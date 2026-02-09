@@ -1,0 +1,46 @@
+# Environment variables - NEVER COMMIT THESE
+backend/.env
+frontend/.env.local
+frontend/.env*.local
+
+# Python cache
+backend/__pycache__/
+backend/**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+
+# Virtual environments
+backend/venv/
+backend/env/
+
+# Node modules
+frontend/node_modules/
+node_modules/
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Old project folder
+my-nextjs-app/
+
+# Distribution
+backend/dist/
+backend/build/
+backend/*.egg-info/
