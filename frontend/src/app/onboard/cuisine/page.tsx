@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { OnboardShell, buildSteps } from "../components";
+import { restoreOnboardingStatus } from "@/lib/onboardingStatus";
 
 /**
  * Cuisine & Time Slots page

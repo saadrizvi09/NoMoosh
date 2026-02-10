@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { OnboardShell, buildSteps } from "../components";
+import { restoreOnboardingStatus } from "@/lib/onboardingStatus";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
@@ -28,12 +29,15 @@ export default function DocumentsPage() {
   const [step1Completed, setStep1Completed] = useState(false);
 
   useEffect(() => {
-    try {
-      setStep0Completed(localStorage.getItem("detailsCompleted") === "true");
-    } catch {}
-    try {
-      setStep1Completed(localStorage.getItem("menuCompleted") === "true");
-    } catch {}
+    // First restore status from database
+    restoreOnboardingStatus().then(() => {
+      try {
+        setStep0Completed(localStorage.getItem("detailsCompleted") === "true");
+      } catch {}
+      try {
+        setStep1Completed(localStorage.getItem("menuCompleted") === "true");
+      } catch {}
+    });
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

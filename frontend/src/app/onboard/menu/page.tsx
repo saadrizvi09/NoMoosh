@@ -4,6 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { OnboardShell, buildSteps } from "../components";
+import { restoreOnboardingStatus } from "@/lib/onboardingStatus";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
@@ -64,12 +65,15 @@ export default function MenuUploadPage() {
   const [showValidationModal, setShowValidationModal] = useState(false);
 
   useEffect(() => {
-    try {
-      setDetailsCompleted(localStorage.getItem("detailsCompleted") === "true");
-    } catch {}
-    try {
-      setMenuCompleted(localStorage.getItem("menuCompleted") === "true");
-    } catch {}
+    // First restore status from database
+    restoreOnboardingStatus().then(() => {
+      try {
+        setDetailsCompleted(localStorage.getItem("detailsCompleted") === "true");
+      } catch {}
+      try {
+        setMenuCompleted(localStorage.getItem("menuCompleted") === "true");
+      } catch {}
+    });
   }, []);
 
   // Cleanup blobs on unmount

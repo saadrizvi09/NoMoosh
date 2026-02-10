@@ -4,6 +4,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { OnboardShell, buildSteps } from "../components";
+import { restoreOnboardingStatus, restoreOnboardingData } from "@/lib/onboardingStatus";
 
 /* --- Helpers --- */
 const emailIsValid = (email: string) => /^\S+@\S+\.\S+$/.test(email.trim());
@@ -185,6 +186,43 @@ export default function OnboardDetailsPage() {
   // Loading flag for submit
   const [saving, setSaving] = useState(false);
   const [showValidationModal, setShowValidationModal] = useState<string | null>(null);
+
+  // Restore onboarding status from database on mount
+  useEffect(() => {
+    restoreOnboardingStatus();
+    
+    // Also restore form data from database
+    restoreOnboardingData().then((data) => {
+      if (data?.temp) {
+        const temp = data.temp;
+        // Update form with data from database
+        setForm((prev) => ({
+          ...prev,
+          restaurantName: temp.restaurant_name || prev.restaurantName,
+          restaurantPhone: temp.rest_mob_number || prev.restaurantPhone,
+          restaurantIntro: temp.description || prev.restaurantIntro,
+          ownerName: temp.owner_name || prev.ownerName,
+          email: temp.owner_email || prev.email,
+          phone: temp.owner_mobile || prev.phone,
+          street: temp.street || prev.street,
+          locality: temp.locality || prev.locality,
+          city: temp.city || prev.city,
+          pincode: temp.pincode || prev.pincode,
+          landmark: temp.landmark || prev.landmark,
+          latitude: temp.latitude ? parseFloat(temp.latitude) : prev.latitude,
+          longitude: temp.longitude ? parseFloat(temp.longitude) : prev.longitude,
+        }));
+        
+        // Update coords for map
+        if (temp.latitude && temp.longitude) {
+          setCoords({ 
+            lat: parseFloat(temp.latitude), 
+            lng: parseFloat(temp.longitude) 
+          });
+        }
+      }
+    });
+  }, []);
 
   // load draft + signup values (single setForm invocation to avoid overwrites)
   useEffect(() => {
