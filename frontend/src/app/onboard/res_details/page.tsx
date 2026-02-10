@@ -56,6 +56,16 @@ export default function Page() {
         // Already have a userId → nothing to do
         if (localStorage.getItem("nomoosh_userId")) return;
 
+        // Prevent retry loop - check if we already failed this session
+        const failedSessionId = localStorage.getItem("nomoosh_failed_session");
+        if (failedSessionId === session.user.id) {
+          // Already tried and failed - sign out to break the loop
+          await supabase.auth.signOut();
+          localStorage.removeItem("nomoosh_failed_session");
+          setModalError("Backend error occurred. Please try signing in again or contact support.");
+          return;
+        }
+
         const pendingName =
           localStorage.getItem("nomoosh_pending_name") ||
           session.user.user_metadata?.full_name ||
@@ -76,10 +86,17 @@ export default function Page() {
           localStorage.setItem("nomoosh_userId", userId);
           localStorage.setItem("nomoosh_name", pendingName);
           if (session.user.email) localStorage.setItem("nomoosh_email", session.user.email);
+          localStorage.removeItem("nomoosh_failed_session"); // Clear any old failure flag
           router.push("/onboard/details");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Auto-login after OAuth failed:", err);
+        // Mark this session as failed to prevent retry loop
+        const result = await supabase.auth.getSession();
+        if (result?.data?.session?.user) {
+          localStorage.setItem("nomoosh_failed_session", result.data.session.user.id);
+        }
+        setModalError(err?.message || "Auto-login failed. Please sign in manually.");
       }
     };
     checkOAuthSession();
@@ -561,10 +578,10 @@ export default function Page() {
                   <input
                     value={otpValue}
                     onChange={(e) => setOtpValue(e.target.value)}
-                    className="w-full border border-gray-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 rounded-lg p-3 mt-1 tracking-[0.4em] text-center font-semibold"
-                    placeholder="0 0 0 0 0 0"
+                    className="w-full border border-gray-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 rounded-lg p-3 mt-1 tracking-[0.3em] text-center font-semibold text-sm"
+                    placeholder="0 0 0 0 0 0 0 0"
                     inputMode="numeric"
-                    maxLength={6}
+                    maxLength={8}
                     aria-label="Enter verification code"
                   />
                   <div className="mt-3 flex gap-2">

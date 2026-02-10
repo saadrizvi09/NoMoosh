@@ -259,7 +259,8 @@ export default function OnboardDetailsPage() {
     setGeoError(null);
 
     try {
-      const res = await fetch(`${BACKEND_BASE || ""}/geocode/reverse`, {
+      if (!BACKEND_BASE) throw new Error("Backend API not configured (NEXT_PUBLIC_API_BASE).");
+      const res = await fetch(`${BACKEND_BASE}/geocode/reverse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lat, lng, language: "en" }),
@@ -365,7 +366,8 @@ export default function OnboardDetailsPage() {
         // ignore storage errors
       }
 
-      const res = await fetch(`${BACKEND_BASE || ""}/register-restaurant_pg1`, {
+      if (!BACKEND_BASE) throw new Error("Backend API not configured (NEXT_PUBLIC_API_BASE).");
+      const res = await fetch(`${BACKEND_BASE}/register-restaurant_pg1`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -403,7 +405,7 @@ export default function OnboardDetailsPage() {
       router.push("/onboard/menu");
     } catch (err: any) {
       console.error("Error saving restaurant:", err);
-      alert(err?.message || "Could not save restaurant details. Please try again.");
+      setGeoError(err?.message || "Could not save restaurant details. Please try again.");
     } finally {
       setSaving(false);
     }

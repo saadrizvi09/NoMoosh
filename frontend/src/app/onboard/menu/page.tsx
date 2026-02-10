@@ -27,6 +27,10 @@ type SectionKey =
   | "kitchen_photos"
   | "kitchen_videos";
 
+type MenuVariant = { variant_name: string; price: number };
+type MenuItem = { name: string; variants: MenuVariant[]; description?: string };
+type MenuCategory = { category: string; items: MenuItem[] };
+
 export default function MenuUploadPage() {
   const router = useRouter();
 
@@ -35,6 +39,11 @@ export default function MenuUploadPage() {
   const [dragOver, setDragOver] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [parseSuccess, setParseSuccess] = useState<{ itemCount: number } | null>(null);
+
+  // ---------------- Parsed menu display ----------------
+  const [parsedCategories, setParsedCategories] = useState<MenuCategory[]>([]);
+  const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
 
   // ---------------- Restaurant media ----------------
   const [media, setMedia] = useState<Record<SectionKey, UploadFile[]>>({
@@ -133,6 +142,7 @@ export default function MenuUploadPage() {
     setIsParsing(true);
 
     try {
+      if (!API_BASE) throw new Error("Backend API not configured (NEXT_PUBLIC_API_BASE).");
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f.file));
 
@@ -141,12 +151,98 @@ export default function MenuUploadPage() {
 
       const parsedMenu = await res.json(); // { menu: {...} }
       localStorage.setItem("parsedMenuItems", JSON.stringify(parsedMenu));
-      // stays on this page so user can continue adding restaurant media
+      
+      // Count total items and load categories
+      let totalItems = 0;
+      const cats: MenuCategory[] = [];
+      if (parsedMenu?.menu?.categories) {
+        parsedMenu.menu.categories.forEach((cat: any) => {
+          const items = cat.items || [];
+          totalItems += items.length;
+          cats.push({
+            category: cat.category || "General",
+            items: items.map((item: any) => ({
+              name: item.name || "Unnamed",
+              variants: item.variants || [{ variant_name: "Regular", price: 0 }],
+              description: item.description || ""
+            }))
+          });
+        });
+      }
+      setParsedCategories(cats);
+      setExpandedCategories(new Set(cats.map((_, idx) => idx))); // Expand all
+      setParseSuccess({ itemCount: totalItems });
+      setError(null);
     } catch (err: any) {
       console.error("Upload/parse error", err);
       setError(err.message || "Upload failed — try again.");
+      setParseSuccess(null);
     } finally {
       setIsParsing(false);
+    }
+  };
+
+  // ------------- Menu item manipulation -------------
+  const toggleCategory = (idx: number) => {
+    setExpandedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const updateItemName = (catIdx: number, itemIdx: number, name: string) => {
+    setParsedCategories(prev => {
+      const next = [...prev];
+      next[catIdx].items[itemIdx].name = name;
+      return next;
+    });
+  };
+
+  const updateVariantPrice = (catIdx: number, itemIdx: number, varIdx: number, price: string) => {
+    setParsedCategories(prev => {
+      const next = [...prev];
+      next[catIdx].items[itemIdx].variants[varIdx].price = parseInt(price) || 0;
+      return next;
+    });
+  };
+
+  const removeItem = (catIdx: number, itemIdx: number) => {
+    setParsedCategories(prev => {
+      const next = [...prev];
+      next[catIdx].items.splice(itemIdx, 1);
+      return next;
+    });
+  };
+
+  const addItem = (catIdx: number) => {
+    setParsedCategories(prev => {
+      const next = [...prev];
+      next[catIdx].items.push({
+        name: "New Dish",
+        variants: [{ variant_name: "Regular", price: 0 }],
+        description: ""
+      });
+      return next;
+    });
+  };
+
+  const addCategory = () => {
+    setParsedCategories(prev => [...prev, { category: "New Category", items: [] }]);
+  };
+
+  const updateCategoryName = (idx: number, name: string) => {
+    setParsedCategories(prev => {
+      const next = [...prev];
+      next[idx].category = name;
+      return next;
+    });
+  };
+
+  const removeCategory = (idx: number) => {
+    if (confirm("Remove this entire category?")) {
+      setParsedCategories(prev => prev.filter((_, i) => i !== idx));
     }
   };
 
@@ -389,6 +485,109 @@ export default function MenuUploadPage() {
               <div className="mt-8">
                 <h3 className="font-semibold text-slate-700 mb-3">Files to upload</h3>
                 {error && <div className="text-sm text-red-500 mb-3">{error}</div>}
+                {parseSuccess && (
+                  <div className="mb-3 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
+                    <svg className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    <div>
+                      <p className="text-green-800 font-medium text-sm">✓ Menu parsed successfully!</p>
+                      <p className="text-green-700 text-sm mt-1">
+                        Found <strong>{parseSuccess.itemCount}</strong> dish{parseSuccess.itemCount !== 1 ? 'es' : ''}. Review and edit below.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {parsedCategories.length > 0 && (
+                  <div className="mb-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold text-slate-800">Parsed Menu Items</h3>
+                      <button
+                        onClick={addCategory}
+                        className="text-sm px-3 py-1.5 rounded-lg border border-emerald-500 text-emerald-600 hover:bg-emerald-50"
+                      >
+                        + Add Category
+                      </button>
+                    </div>
+
+                    {parsedCategories.map((cat, catIdx) => (
+                      <div key={catIdx} className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                        <div
+                          className="flex items-center justify-between p-4 bg-slate-50 cursor-pointer hover:bg-slate-100"
+                          onClick={() => toggleCategory(catIdx)}
+                        >
+                          <div className="flex items-center gap-3 flex-1">
+                            <svg className={`w-4 h-4 text-slate-600 transition-transform ${expandedCategories.has(catIdx) ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                            </svg>
+                            <input
+                              type="text"
+                              value={cat.category}
+                              onChange={(e) => { e.stopPropagation(); updateCategoryName(catIdx, e.target.value); }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="font-semibold text-slate-800 bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
+                            />
+                            <span className="text-sm text-slate-500">({cat.items.length} items)</span>
+                          </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); removeCategory(catIdx); }}
+                            className="text-red-500 hover:text-red-700 text-sm px-2"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        {expandedCategories.has(catIdx) && (
+                          <div className="p-4 space-y-3">
+                            {cat.items.map((item, itemIdx) => (
+                              <div key={itemIdx} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                                <div className="flex items-start gap-3">
+                                  <div className="flex-1 space-y-2">
+                                    <input
+                                      type="text"
+                                      value={item.name}
+                                      onChange={(e) => updateItemName(catIdx, itemIdx, e.target.value)}
+                                      className="w-full px-2 py-1 border border-slate-300 rounded focus:ring-2 focus:ring-blue-300 focus:border-blue-400"
+                                      placeholder="Dish name"
+                                    />
+                                    <div className="space-y-1">
+                                      {item.variants.map((variant, varIdx) => (
+                                        <div key={varIdx} className="flex items-center gap-2">
+                                          <span className="text-sm text-slate-600 w-20">{variant.variant_name}:</span>
+                                          <span className="text-slate-500">₹</span>
+                                          <input
+                                            type="number"
+                                            value={variant.price}
+                                            onChange={(e) => updateVariantPrice(catIdx, itemIdx, varIdx, e.target.value)}
+                                            className="w-24 px-2 py-1 border border-slate-300 rounded focus:ring-2 focus:ring-blue-300"
+                                            placeholder="Price"
+                                          />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => removeItem(catIdx, itemIdx)}
+                                    className="text-red-500 hover:text-red-700 text-sm px-2"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                            <button
+                              onClick={() => addItem(catIdx)}
+                              className="w-full text-sm py-2 border border-dashed border-slate-300 rounded-lg text-slate-600 hover:bg-white hover:border-emerald-500 hover:text-emerald-600"
+                            >
+                              + Add Dish to {cat.category}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {files.length === 0 ? (
                   <div className="text-slate-400">No files added yet.</div>
