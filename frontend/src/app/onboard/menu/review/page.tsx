@@ -1,8 +1,9 @@
 // src/app/onboard/menu/review/page.tsx
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { OnboardShell, buildSteps } from "../../components";
 
 /** Types */
 type Variant = {
@@ -73,6 +74,8 @@ export default function ReviewParsedMenuPage() {
   // ---- ADDED: completion flags for gating Cuisine navigation ----
   const [detailsCompleted, setDetailsCompleted] = useState(false);
   const [menuCompleted, setMenuCompleted] = useState(false);
+  const [showValidationModal, setShowValidationModal] = useState(false);
+
   useEffect(() => {
     try {
       setDetailsCompleted(localStorage.getItem("detailsCompleted") === "true");
@@ -87,7 +90,7 @@ export default function ReviewParsedMenuPage() {
     if (detailsOk && menuOk) {
       router.push("/onboard/cuisine");
     } else {
-      alert("Please complete Menu Info before continuing to Cuisine & Time slots.");
+      setShowValidationModal(true);
     }
   };
   // ----------------------------------------------------------------
@@ -473,80 +476,18 @@ export default function ReviewParsedMenuPage() {
     }
   }
 
+  const steps = useMemo(
+    () =>
+      buildSteps(2, { details: detailsCompleted, menu: menuCompleted }, { 3: goCuisineIfAllowed }),
+    [detailsCompleted, menuCompleted]
+  );
+
   /* -----------------------
      Render
      ----------------------- */
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white">
-      <header className="fixed top-0 inset-x-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="text-xl font-bold text-sky-600">Nomoosh Partner</div>
-          <div className="text-sm text-sky-600">Need help? Call 7091863593</div>
-        </div>
-      </header>
-      <div className="h-18" />
-
-      {/* add bottom padding on mobile so content doesn't go under sticky nav */}
-      <main className="max-w-7xl mx-auto px-6 py-8 pb-24 lg:pb-8">
-        <div className="grid grid-cols-12 gap-8">
-          {/* Sidebar kept as before but hidden on mobile; sticky on desktop */}
-          <aside className="hidden lg:block col-span-3">
-            <div className="sticky top-8">
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                <h3 className="text-lg font-semibold mb-6">Complete your registration</h3>
-
-                <div className="space-y-4">
-                  <div className="w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ring-1 ring-emerald-100 shadow">
-                    <div className="h-9 w-9 rounded-full flex items-center justify-center bg-emerald-100 text-emerald-600">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M7 2v10a2 2 0 0 1-2 2H3V2h4zm14 0v10a2 2 0 0 1-2 2h-2V2h4zM9 14h6v8H9v-8z"/></svg>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-emerald-600">Restaurant information</div>
-                      <div className="text-xs text-slate-400">Basic details and location</div>
-                    </div>
-                  </div>
-
-                  <div className="w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ring-1 ring-sky-50 bg-sky-50">
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h18v2H3V4zm0 5h18v2H3V9zm0 5h18v6H3v-6z"/></svg>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Menu and operational details</div>
-                      <div className="text-xs text-slate-400">Upload your menu & images</div>
-                    </div>
-                  </div>
-
-                  {/* ADDED: Cuisine & Time slots step (guarded) */}
-                  <button
-                    onClick={goCuisineIfAllowed}
-                    className="w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow hover:shadow-sm"
-                  >
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"/></svg>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Cuisine & Time slots</div>
-                      <div className="text-xs text-slate-400">Cuisines, open days & timings</div>
-                    </div>
-                  </button>
-                  {/* ------------------------------------------- */}
-
-                  <div className="w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow hover:shadow-sm">
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M4 3h16v14H4zM4 21h16v2H4z"/></svg>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Restaurant documents</div>
-                      <div className="text-xs text-slate-400">PAN, GST, FSSAI, bank details</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          {/* Main */}
-          <section className="col-span-12 lg:col-span-9">
+    <>
+      <OnboardShell currentStep={2} steps={steps}>
             <h1 className="text-3xl font-extrabold text-slate-800 mb-6">Review parsed menu</h1>
 
             {globalError && <div className="mb-4 text-sm text-red-600">{globalError}</div>}
@@ -701,51 +642,35 @@ export default function ReviewParsedMenuPage() {
               <button
                 onClick={handleSaveAndContinue}
                 disabled={saving || uploadingAny}
-                className={`px-6 py-3 bg-emerald-600 text-white rounded-md shadow hover:bg-emerald-700 ${saving || uploadingAny ? "opacity-70 cursor-not-allowed" : ""}`}
+                className={`px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 font-medium ${saving || uploadingAny ? "opacity-70 cursor-not-allowed" : ""}`}
               >
-                {saving ? "Saving..." : "Save & Continue"}
+                {saving ? "Saving..." : "Save & Continue →"}
               </button>
             </div>
-          </section>
-        </div>
-      </main>
+      </OnboardShell>
 
-      {/* Mobile sticky step bar (same pattern as menu page) */}
-      <nav className="fixed bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 lg:hidden">
-        {/* ADDED Cuisine tab; grid now 4 cols */}
-        <div className="max-w-7xl mx-auto grid grid-cols-4">
-          <button
-            onClick={() => router.push("/onboard/details")}
-            className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-          >
-            <span className="h-1 w-8 rounded-full bg-slate-200" />
-            Info
-          </button>
-          <button
-            onClick={() => {}}
-            className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-sky-600"
-          >
-            <span className="h-1 w-8 rounded-full bg-sky-600" />
-            Menu
-          </button>
-          <button
-            onClick={goCuisineIfAllowed}
-            className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-          >
-            <span className="h-1 w-8 rounded-full bg-slate-200" />
-            Cuisine
-          </button>
-          <button
-            onClick={() => router.push("/onboard/documents")}
-            className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-          >
-            <span className="h-1 w-8 rounded-full bg-slate-200" />
-            Docs
-          </button>
+      {/* Validation Modal */}
+      {showValidationModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center">
+                <svg className="w-5 h-5 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Complete This Step</h3>
+            </div>
+            <p className="text-slate-600 mb-6">Please complete Menu Info before continuing to Cuisine & Time slots.</p>
+            <button
+              onClick={() => setShowValidationModal(false)}
+              className="w-full px-4 py-2.5 rounded-xl bg-[#1c37b3] text-white font-medium hover:opacity-90 transition"
+            >
+              OK
+            </button>
+          </div>
         </div>
-        {/* Safe-area spacer for iOS home bar */}
-        <div className="h-[calc(env(safe-area-inset-bottom,0px))]" />
-      </nav>
-    </div>
+      )}
+    </>
   );
 }

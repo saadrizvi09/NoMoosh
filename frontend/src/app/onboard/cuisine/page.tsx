@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { OnboardShell, buildSteps } from "../components";
 
 /**
  * Cuisine & Time Slots page
@@ -86,6 +87,7 @@ export default function CuisineTimingsPage() {
   // UI state
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showValidationModal, setShowValidationModal] = useState(false);
 
   // Load persisted flags and ids
   useEffect(() => {
@@ -267,7 +269,7 @@ export default function CuisineTimingsPage() {
   const gotoDocuments = () => {
     const done = typeof window !== "undefined" && localStorage.getItem("cuisineTimesCompleted") === "true";
     if (!done) {
-      alert("Please complete Cuisine & Time slots before continuing to Documents.");
+      setShowValidationModal(true);
       return;
     }
     router.push("/onboard/documents");
@@ -275,127 +277,20 @@ export default function CuisineTimingsPage() {
 
   const gotoCurrent = () => {}; // current page
 
+  const steps = buildSteps(3, {
+    details: detailsCompleted,
+    menu: menuCompleted,
+    cuisine: typeof window !== "undefined" && localStorage.getItem("cuisineTimesCompleted") === "true",
+    docs: typeof window !== "undefined" && localStorage.getItem("documentsCompleted") === "true",
+  }, {
+    1: gotoDetails,
+    2: gotoMenu,
+    4: gotoDocuments,
+  });
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white">
-      {/* Header */}
-      <header className="fixed top-0 inset-x-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="text-xl font-bold text-sky-600">Nomoosh Partner</div>
-          <div className="text-sm text-sky-600">Need help? Call 7091863593</div>
-        </div>
-      </header>
-      <div className="h-18" />
-
-      {/* Add extra bottom padding on mobile so content doesn't hide behind sticky mobile bar */}
-      <main className="max-w-7xl mx-auto px-6 py-8 pb-24 lg:pb-8">
-        <div className="grid grid-cols-12 gap-8">
-          {/* Sidebar: hide on mobile, sticky on desktop */}
-          <aside className="hidden lg:block col-span-3">
-            <div className="sticky top-8">
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                <h3 className="text-lg font-semibold mb-6">Complete your registration</h3>
-
-                <div className="space-y-4">
-                  {/* Step 0 */}
-                  <button
-                    onClick={gotoDetails}
-                    className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ${
-                      detailsCompleted ? "ring-1 ring-emerald-100 shadow" : "hover:shadow-sm"
-                    }`}
-                  >
-                    <div
-                      className={`h-9 w-9 rounded-full flex items-center justify-center ${
-                        detailsCompleted ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-600"
-                      }`}
-                      aria-hidden
-                    >
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M7 2v10a2 2 0 0 1-2 2H3V2h4zm14 0v10a2 2 0 0 1-2 2h-2V2h4zM9 14h6v8H9v-8z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div
-                        className={`text-sm font-medium ${
-                          detailsCompleted ? "text-emerald-600" : "text-slate-700"
-                        }`}
-                      >
-                        Restaurant information
-                      </div>
-                      <div className="text-xs text-slate-400">Basic details & location</div>
-                    </div>
-                  </button>
-
-                  {/* Step 1 */}
-                  <button
-                    onClick={gotoMenu}
-                    className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ${
-                      menuCompleted ? "ring-1 ring-emerald-100 shadow" : "hover:shadow-sm"
-                    }`}
-                  >
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M3 4h18v2H3V4zm0 5h18v2H3V9zm0 5h18v6H3v-6z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div
-                        className={`text-sm font-medium ${
-                          menuCompleted ? "text-emerald-600" : "text-slate-700"
-                        }`}
-                      >
-                        Menu & operational details
-                      </div>
-                      <div className="text-xs text-slate-400">Upload menu & images</div>
-                    </div>
-                  </button>
-
-                  {/* Step 2 (current) */}
-                  <button
-                    onClick={gotoCurrent}
-                    className="w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ring-1 ring-sky-100 bg-sky-50 shadow-sm"
-                  >
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 3l7 4v10l-7 4-7-4V7l7-4z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Cuisine & Time slots</div>
-                      <div className="text-xs text-slate-400">Cuisines, open days & timings</div>
-                    </div>
-                  </button>
-
-                  {/* Step 3 */}
-                  <button
-                    onClick={gotoDocuments}
-                    className="w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow hover:shadow-sm"
-                  >
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M4 3h16v14H4zM4 21h16v2H4z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Restaurant documents</div>
-                      <div className="text-xs text-slate-400">PAN, bank account details</div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-6 space-y-4">
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                  <div className="text-sm font-semibold">Tip</div>
-                  <div className="text-xs text-slate-400 mt-2">
-                    Select up to 8 cuisines. Add multiple time windows per day if needed.
-                  </div>
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          {/* Main */}
-          <section className="col-span-12 lg:col-span-9 space-y-8">
+    <>
+      <OnboardShell currentStep={3} steps={steps}>
             {/* Cuisines */}
             <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100">
               <h2 className="text-2xl font-extrabold text-slate-800">Select cuisines</h2>
@@ -586,59 +481,38 @@ export default function CuisineTimingsPage() {
                 <button
                   onClick={handleSaveContinue}
                   disabled={saving}
-                  className={`px-6 py-3 bg-emerald-600 text-white rounded-xl shadow hover:bg-emerald-700 ${
+                  className={`px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 transition ${
                     saving ? "opacity-70 cursor-not-allowed" : ""
                   }`}
                 >
-                  {saving ? "Saving…" : "Save & Continue"}
+                  {saving ? "Saving…" : "Save & Continue →"}
                 </button>
               </div>
             </div>
-          </section>
-        </div>
-      </main>
+      </OnboardShell>
 
-      {/* Mobile sticky step bar */}
-      {/* Mobile sticky step bar */}
-<nav className="fixed bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 lg:hidden">
-  <div className="max-w-7xl mx-auto grid grid-cols-4">
-    <button
-      onClick={gotoDetails}
-      className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-    >
-      <span className="h-1 w-8 rounded-full bg-slate-200" />
-      Info
-    </button>
-
-    <button
-      onClick={gotoMenu}
-      className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-    >
-      <span className="h-1 w-8 rounded-full bg-slate-200" />
-      Menu
-    </button>
-
-    {/* ✅ Cuisine step (current) */}
-    <button
-      onClick={gotoCurrent}
-      className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-sky-700"
-    >
-      <span className="h-1 w-8 rounded-full bg-sky-500" />
-      Cuisine
-    </button>
-
-    <button
-      onClick={gotoDocuments}
-      className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-    >
-      <span className="h-1 w-8 rounded-full bg-slate-200" />
-      Docs
-    </button>
-  </div>
-  {/* Safe-area spacer for iOS home bar */}
-  <div className="h-[calc(env(safe-area-inset-bottom,0px))]" />
-</nav>
-
-    </div>
-  );
-}
+      {/* Validation Modal */}
+        {showValidationModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-slate-900">Complete This Step</h3>
+              </div>
+              <p className="text-slate-600 mb-6">Please complete Cuisine & Time slots before continuing to Documents.</p>
+              <button
+                onClick={() => setShowValidationModal(false)}
+                className="w-full px-4 py-2.5 rounded-xl bg-[#1c37b3] text-white font-medium hover:opacity-90 transition"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }

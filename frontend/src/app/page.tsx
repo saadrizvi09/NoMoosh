@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 /**
  * Nomoosh Landing Page (Premium UI)
@@ -14,6 +15,45 @@ const BRAND = "#1c37b3";
 
 export default function LandingPage() {
   const router = useRouter();
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setUserName(localStorage.getItem("nomoosh_name"));
+      setUserEmail(localStorage.getItem("nomoosh_email"));
+    }
+  }, []);
+
+  /* close dropdown on outside click */
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleSignOut = async () => {
+    setShowSignOutModal(false);
+    try { await supabase.auth.signOut(); } catch (e) { console.error("Supabase sign-out error:", e); }
+    localStorage.removeItem("nomoosh_userId");
+    localStorage.removeItem("nomoosh_name");
+    localStorage.removeItem("nomoosh_email");
+    localStorage.removeItem("nomoosh_phone");
+    localStorage.removeItem("nomoosh_token");
+    localStorage.removeItem("nomoosh_oauth_completed");
+    localStorage.removeItem("nomoosh_failed_session");
+    localStorage.removeItem("nomoosh_detailsForm");
+    localStorage.removeItem("detailsCompleted");
+    localStorage.removeItem("menuCompleted");
+    window.location.href = "/";
+  };
 
   const goJoinRestaurant = () => router.push("/onboard/res_details");
 
@@ -69,16 +109,94 @@ export default function LandingPage() {
             </button>
           </nav>
 
-          {/* CTA */}
-          <button
-            onClick={goJoinRestaurant}
-            className="px-5 py-2 rounded-xl text-white font-semibold shadow-md hover:opacity-95 transition"
-            style={{ background: BRAND }}
-          >
-            Join as Restaurant
-          </button>
+          {/* Right: User icon or Join CTA */}
+          {userName ? (
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setShowUserMenu((p) => !p)}
+                className="flex items-center gap-2 hover:bg-slate-100 rounded-full p-1.5 pr-3 transition-colors"
+                aria-label="User menu"
+              >
+                <div
+                  className="h-9 w-9 rounded-full text-white flex items-center justify-center font-semibold text-sm"
+                  style={{ background: BRAND }}
+                >
+                  {userName.charAt(0).toUpperCase()}
+                </div>
+                <svg className="w-4 h-4 text-slate-600 hidden sm:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+
+              {showUserMenu && (
+                <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-200 py-2 z-[70]">
+                  <div className="px-4 py-3 border-b border-slate-100">
+                    <div className="font-medium text-slate-900 text-sm">{userName}</div>
+                    {userEmail && <div className="text-xs text-slate-500 mt-0.5">{userEmail}</div>}
+                  </div>
+                  <button
+                    onClick={goJoinRestaurant}
+                    className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 12h18M12 3v18" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Continue Registration
+                  </button>
+                  <button
+                    onClick={() => setShowSignOutModal(true)}
+                    className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={goJoinRestaurant}
+              className="px-5 py-2 rounded-xl text-white font-semibold shadow-md hover:opacity-95 transition"
+              style={{ background: BRAND }}
+            >
+              Join as Restaurant
+            </button>
+          )}
         </div>
       </header>
+
+      {/* Sign Out Confirmation Modal */}
+      {showSignOutModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Sign Out?</h3>
+            </div>
+            <p className="text-slate-600 mb-6">Are you sure you want to sign out? You'll need to log in again to continue.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSignOutModal(false)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-medium hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSignOut}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white font-medium hover:bg-red-700 transition"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* HERO */}
       <section id="top" className="relative overflow-hidden">
@@ -90,7 +208,7 @@ export default function LandingPage() {
               Now live in 50+ cities
             </div>
 
-            <h1 className="mt-8 text-[52px] leading-[1.05] font-extrabold tracking-tight">
+            <h1 className="mt-8 text-[32px] sm:text-[42px] lg:text-[52px] leading-[1.05] font-extrabold tracking-tight">
               <span className="font-serif font-semibold text-slate-900">
                 Menus that live{" "}
               </span>
@@ -123,15 +241,15 @@ export default function LandingPage() {
             </div>
 
             {/* stats */}
-            <div className="mt-14 grid grid-cols-3 gap-10 max-w-lg">
+            <div className="mt-14 grid grid-cols-3 gap-6 sm:gap-10 max-w-lg">
               <Stat value="500+" label="Restaurants" />
               <Stat value="2M+" label="Orders Placed" />
               <Stat value="4.9" label="Rating" />
             </div>
           </div>
 
-          {/* right */}
-          <div className="relative flex justify-center lg:justify-end">
+          {/* right — hidden on small screens */}
+          <div className="relative hidden lg:flex justify-center lg:justify-end">
             {/* phone mock */}
             <div className="relative w-[360px] h-[540px] rounded-[40px] bg-gradient-to-b from-slate-50 to-white shadow-2xl border border-slate-200 overflow-hidden">
               {/* top notch */}
@@ -181,7 +299,7 @@ export default function LandingPage() {
       {/* HOW IT WORKS */}
       <section id="how" className="py-24">
         <div className="max-w-7xl mx-auto px-6">
-          <h2 className="text-center font-serif text-5xl font-semibold text-slate-900">
+          <h2 className="text-center font-serif text-3xl sm:text-4xl lg:text-5xl font-semibold text-slate-900">
             How Nomoosh works
           </h2>
           <p className="text-center text-slate-600 mt-4 text-lg">
@@ -216,7 +334,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-14 items-start">
           {/* left */}
           <div>
-            <h2 className="font-serif text-6xl leading-[1.05] font-semibold">
+            <h2 className="font-serif text-3xl sm:text-4xl lg:text-6xl leading-[1.05] font-semibold">
               Why restaurants choose{" "}
               <span className="text-[#1c37b3]">Nomoosh</span>
             </h2>
@@ -272,7 +390,7 @@ export default function LandingPage() {
       {/* TESTIMONIALS */}
       <section className="py-24">
         <div className="max-w-7xl mx-auto px-6">
-          <h2 className="text-center font-serif text-6xl font-semibold">
+          <h2 className="text-center font-serif text-3xl sm:text-4xl lg:text-6xl font-semibold">
             Loved by restaurants
           </h2>
           <p className="text-center text-slate-600 mt-4 text-lg">
@@ -302,7 +420,7 @@ export default function LandingPage() {
       {/* FIND RESTAURANTS */}
       <section id="restaurants" className="py-28 bg-[#fbfaf8] border-t border-slate-200">
         <div className="max-w-7xl mx-auto px-6">
-          <h2 className="text-center font-serif text-6xl font-semibold">
+          <h2 className="text-center font-serif text-3xl sm:text-4xl lg:text-6xl font-semibold">
             Find nearby restaurants
           </h2>
           <p className="text-center text-slate-600 mt-4 text-lg">
@@ -328,7 +446,7 @@ export default function LandingPage() {
           </div>
 
           {/* cards */}
-          <div className="mt-16 grid md:grid-cols-4 gap-6">
+          <div className="mt-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <RestaurantCard
               title="The Grand Kitchen"
               rating="4.8"
@@ -381,7 +499,7 @@ export default function LandingPage() {
             ✨ Limited time: First 3 months free
           </div>
 
-          <h2 className="mt-8 font-serif text-6xl font-semibold">
+          <h2 className="mt-8 font-serif text-3xl sm:text-4xl lg:text-6xl font-semibold">
             Turn every table into a smart table.
           </h2>
 
@@ -451,18 +569,18 @@ export default function LandingPage() {
   );
 }
 
-/* -------------------- Components -------------------- */
+/* -------------------- Components (memoized) -------------------- */
 
-function Stat({ value, label }: { value: string; label: string }) {
+const Stat = React.memo(function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div>
-      <div className="text-4xl font-extrabold text-[#1c37b3]">{value}</div>
-      <div className="text-slate-500 mt-1">{label}</div>
+      <div className="text-3xl sm:text-4xl font-extrabold text-[#1c37b3]">{value}</div>
+      <div className="text-slate-500 mt-1 text-sm sm:text-base">{label}</div>
     </div>
   );
-}
+});
 
-function MenuRow({
+const MenuRow = React.memo(function MenuRow({
   title,
   badge,
   price,
@@ -486,9 +604,9 @@ function MenuRow({
       <div className="font-bold text-[#1c37b3]">{price}</div>
     </div>
   );
-}
+});
 
-function StepCard({
+const StepCard = React.memo(function StepCard({
   step,
   title,
   desc,
@@ -507,24 +625,24 @@ function StepCard({
       <div className="h-14 w-14 rounded-2xl bg-[#eef0ff] text-[#1c37b3] flex items-center justify-center text-2xl">
         {icon}
       </div>
-      <h3 className="mt-6 font-serif text-2xl font-bold">{title}</h3>
+      <h3 className="mt-6 font-serif text-xl sm:text-2xl font-bold">{title}</h3>
       <p className="mt-4 text-slate-600 leading-relaxed">{desc}</p>
     </div>
   );
-}
+});
 
-function FeatureBullet({ text }: { text: string }) {
+const FeatureBullet = React.memo(function FeatureBullet({ text }: { text: string }) {
   return (
-    <li className="flex items-center gap-4 text-lg">
-      <div className="h-9 w-9 rounded-full bg-white shadow-sm border border-slate-200 flex items-center justify-center text-[#1c37b3] font-bold">
+    <li className="flex items-center gap-4 text-base sm:text-lg">
+      <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-white shadow-sm border border-slate-200 flex items-center justify-center text-[#1c37b3] font-bold flex-shrink-0">
         ✓
       </div>
       {text}
     </li>
   );
-}
+});
 
-function FeatureCard({
+const FeatureCard = React.memo(function FeatureCard({
   title,
   desc,
   icon,
@@ -538,13 +656,13 @@ function FeatureCard({
       <div className="h-14 w-14 rounded-2xl bg-[#eef0ff] text-[#1c37b3] flex items-center justify-center text-2xl">
         {icon}
       </div>
-      <h4 className="mt-6 font-serif text-xl font-bold">{title}</h4>
-      <p className="mt-3 text-slate-600">{desc}</p>
+      <h4 className="mt-6 font-serif text-lg sm:text-xl font-bold">{title}</h4>
+      <p className="mt-3 text-slate-600 text-sm sm:text-base">{desc}</p>
     </div>
   );
-}
+});
 
-function TestimonialCard({
+const TestimonialCard = React.memo(function TestimonialCard({
   quote,
   name,
   role,
@@ -563,7 +681,7 @@ function TestimonialCard({
         ★★★★★
       </div>
 
-      <p className="mt-6 text-slate-700 leading-relaxed">"{quote}"</p>
+      <p className="mt-6 text-slate-700 leading-relaxed">&ldquo;{quote}&rdquo;</p>
 
       <div className="mt-10 flex items-center gap-4">
         <div className="h-12 w-12 rounded-full bg-[#eef0ff] border border-slate-200 flex items-center justify-center">
@@ -576,9 +694,9 @@ function TestimonialCard({
       </div>
     </div>
   );
-}
+});
 
-function RestaurantCard({
+const RestaurantCard = React.memo(function RestaurantCard({
   title,
   rating,
   meta,
@@ -620,9 +738,9 @@ function RestaurantCard({
       </div>
     </div>
   );
-}
+});
 
-function FooterCol({ title, items }: { title: string; items: string[] }) {
+const FooterCol = React.memo(function FooterCol({ title, items }: { title: string; items: string[] }) {
   return (
     <div>
       <div className="font-semibold mb-4">{title}</div>
@@ -635,4 +753,4 @@ function FooterCol({ title, items }: { title: string; items: string[] }) {
       </ul>
     </div>
   );
-}
+});

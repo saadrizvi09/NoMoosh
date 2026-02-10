@@ -231,7 +231,11 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
     FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
 );
 
-CREATE TYPE session_status AS ENUM ('active','payment_pending','completed','expired');
+DO $$ BEGIN
+    CREATE TYPE session_status AS ENUM ('active','payment_pending','completed','expired');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS sessions (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -245,7 +249,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
 );
 
-CREATE TYPE participant_role AS ENUM ('guest','host');
+DO $$ BEGIN
+    CREATE TYPE participant_role AS ENUM ('guest','host');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS participants (
     id                 UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -278,7 +286,11 @@ CREATE TABLE IF NOT EXISTS cart_items (
     FOREIGN KEY (added_by)     REFERENCES participants(id)
 );
 
-CREATE TYPE order_status AS ENUM ('pending','paid','failed');
+DO $$ BEGIN
+    CREATE TYPE order_status AS ENUM ('pending','paid','failed');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS orders (
     id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -304,8 +316,17 @@ CREATE TABLE IF NOT EXISTS order_items (
 -- 4. PAYMENTS
 -- ==========================================================
 
-CREATE TYPE payment_status AS ENUM ('initiated','success','failed','refunded');
-CREATE TYPE payment_method AS ENUM ('upi','card','wallet','net_banking','cash');
+DO $$ BEGIN
+    CREATE TYPE payment_status AS ENUM ('initiated','success','failed','refunded');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE payment_method AS ENUM ('upi','card','wallet','net_banking','cash');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS payments (
     id                     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -7,7 +7,7 @@
 @import "tailwindcss/utilities"; */
 /* Theme vars */
 :root{
-  --brand: #2563eb; /* blue like reference */
+  --brand: #1c37b3;
   --accent: #f8fafc;
   --muted: #6b7280;
   --card-shadow: 0 12px 30px rgba(15,23,42,0.08);

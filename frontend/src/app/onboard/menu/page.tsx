@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { OnboardShell, buildSteps } from "../components";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
@@ -44,6 +45,7 @@ export default function MenuUploadPage() {
   // ---------------- Parsed menu display ----------------
   const [parsedCategories, setParsedCategories] = useState<MenuCategory[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
+  const [saving, setSaving] = useState(false);
 
   // ---------------- Restaurant media ----------------
   const [media, setMedia] = useState<Record<SectionKey, UploadFile[]>>({
@@ -58,6 +60,9 @@ export default function MenuUploadPage() {
   // ---------------- Sidebar badge ----------------
   const [detailsCompleted, setDetailsCompleted] = useState(false);
   const [menuCompleted, setMenuCompleted] = useState(false); // <-- added
+  const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState<number | null>(null);
+  const [showValidationModal, setShowValidationModal] = useState(false);
+
   useEffect(() => {
     try {
       setDetailsCompleted(localStorage.getItem("detailsCompleted") === "true");
@@ -241,8 +246,13 @@ export default function MenuUploadPage() {
   };
 
   const removeCategory = (idx: number) => {
-    if (confirm("Remove this entire category?")) {
-      setParsedCategories(prev => prev.filter((_, i) => i !== idx));
+    setShowDeleteCategoryModal(idx);
+  };
+
+  const confirmRemoveCategory = () => {
+    if (showDeleteCategoryModal !== null) {
+      setParsedCategories(prev => prev.filter((_, i) => i !== showDeleteCategoryModal));
+      setShowDeleteCategoryModal(null);
     }
   };
 
@@ -277,15 +287,23 @@ export default function MenuUploadPage() {
     });
   };
 
-  // ------------- Save & Continue (upload all media to AWS + go review) -------------
+  // ------------- Save & Continue (upload media + save menu to DB + go cuisine) -------------
   const handleSaveAndContinue = async () => {
     setError(null);
+    
+    // Validation: must have parsed categories
+    if (parsedCategories.length === 0) {
+      setError("Please parse your menu before saving.");
+      return;
+    }
+    
+    setSaving(true);
+    
     try {
       if (!API_BASE) throw new Error("API base not configured (NEXT_PUBLIC_API_BASE).");
 
+      // Step 1: Upload restaurant media
       const fd = new FormData();
-
-      // Include user_id for backend association
       const userId = localStorage.getItem("nomoosh_userId");
       if (userId) fd.append("user_id", userId);
 
@@ -304,27 +322,63 @@ export default function MenuUploadPage() {
         media[k].forEach((m) => fd.append(`${k}[]`, m.file));
       });
 
-      // Replace this path if your backend expects a different one.
-      const res = await fetch(`${API_BASE}/upload-restaurant-media`, {
+      const mediaRes = await fetch(`${API_BASE}/upload-restaurant-media`, {
         method: "POST",
         body: fd,
       });
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Media upload failed (${res.status})`);
+      if (!mediaRes.ok) {
+        const txt = await mediaRes.text().catch(() => "");
+        throw new Error(txt || `Media upload failed (${mediaRes.status})`);
       }
 
+      // Step 2: Build menu payload and save to database
+      const userIdRaw = localStorage.getItem("nomoosh_userId") ?? localStorage.getItem("user_id") ?? "0";
+      const user_id_number = Number(userIdRaw) || 0;
+      const restaurant_name = localStorage.getItem("nomoosh_restaurant_name") ?? localStorage.getItem("restaurantName") ?? "string";
+
+      const menuPayload = {
+        user_id: user_id_number,
+        menu: {
+          restaurant_name,
+          categories: parsedCategories.map((cat) => ({
+            category: cat.category,
+            items: cat.items.map((item) => ({
+              name: item.name,
+              variants: (item.variants || [])
+                .filter((v) => !(v.variant_name === "None" && (v.price === null || v.price === undefined)))
+                .map((v) => ({ variant_name: v.variant_name, price: v.price ?? 0 })),
+              description: (item.description ?? "").toString().trim(),
+              image_link: "",
+            })),
+          })),
+        },
+      };
+
+      const menuRes = await fetch(`${API_BASE}/register-restaurant_pg2`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(menuPayload),
+      });
+
+      if (!menuRes.ok) {
+        const txt = await menuRes.text().catch(() => "");
+        throw new Error(txt || `Menu save failed (${menuRes.status})`);
+      }
+
+      // Mark menu as completed
       try {
         localStorage.setItem("menuCompleted", "true");
         setMenuCompleted(true);
       } catch {}
 
-      // Go to review page
-      router.push("/onboard/menu/review");
+      // Navigate to cuisine page
+      router.push("/onboard/cuisine");
     } catch (err: any) {
       console.error("Save & Continue error:", err);
       setError(err?.message ?? "Save failed");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -345,101 +399,22 @@ export default function MenuUploadPage() {
     if (detailsOk && menuOk) {
       router.push("/onboard/cuisine");
     } else {
-      alert("Please complete Menu Info before continuing to Cuisine & Time slots.");
+      setShowValidationModal(true);
     }
   };
 
+  const steps = buildSteps(2, {
+    details: detailsCompleted,
+    menu: menuCompleted,
+    cuisine: typeof window !== "undefined" && localStorage.getItem("cuisineTimesCompleted") === "true",
+    docs: typeof window !== "undefined" && localStorage.getItem("documentsCompleted") === "true",
+  }, {
+    3: goCuisineIfAllowed,
+  });
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white">
-      <header className="fixed top-0 inset-x-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="text-xl font-semibold text-sky-600">Nomoosh Partner</div>
-          <div className="text-sm text-slate-500">Need help? Call 7091863593</div>
-        </div>
-      </header>
-      <div className="h-14" />
-
-      {/* Add extra bottom padding on mobile so sticky bar doesn't overlap content */}
-      <main className="max-w-6xl mx-auto px-6 pt-10 pb-24 lg:pb-10">
-        <div className="grid grid-cols-12 gap-8">
-          {/* Sidebar (desktop/tablet only, unchanged except Cuisine step) */}
-          <aside className="hidden lg:block col-span-3">
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 sticky top-6">
-              <h3 className="text-lg font-semibold mb-6">Complete your registration</h3>
-
-              <div className="space-y-3">
-                {/* Step 0 */}
-                <button
-                  onClick={() => router.push("/onboard/details")}
-                  className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 transition"
-                >
-                  <div
-                    className={`mt-1 h-9 w-9 rounded-full flex items-center justify-center ${
-                      detailsCompleted ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-600"
-                    }`}
-                  >
-                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M7 2v10a2 2 0 0 1-2 2H3V2h4zm14 0v10a2 2 0 0 1-2 2h-2V2h4zM9 14h6v8H9v-8z" />
-                    </svg>
-                  </div>
-                  <div className="text-left">
-                    <div className={`font-medium ${detailsCompleted ? "text-emerald-600" : "text-slate-700"}`}>
-                      Restaurant information
-                    </div>
-                    <div className="text-xs text-slate-400">Basic details & location</div>
-                  </div>
-                </button>
-
-                {/* Step 1 (current) */}
-                <div className="w-full flex items-start gap-3 p-3 rounded-lg bg-sky-50 border border-slate-100">
-                  <div className="mt-1 h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M3 4h18v2H3V4zm0 5h18v2H3V9zm0 5h18v6H3v-6z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="font-medium text-slate-700">Menu and operational details</div>
-                    <div className="text-xs text-slate-400">Upload your menu PDF or photo</div>
-                  </div>
-                </div>
-
-                {/* Step 2 (Cuisine & Time slots) */}
-                <button
-                  onClick={goCuisineIfAllowed}
-                  className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 transition"
-                >
-                  <div className="mt-1 h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 3l7 4v10l-7 4-7-4V7l7-4z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="font-medium text-slate-700">Cuisine & Time slots</div>
-                    <div className="text-xs text-slate-400">Cuisines, open days & timings</div>
-                  </div>
-                </button>
-
-                {/* Step 3 */}
-                <button
-                  onClick={() => router.push("/onboard/documents")}
-                  className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 transition"
-                >
-                  <div className="mt-1 h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M4 3h16v14H4zM4 21h16v2H4z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="font-medium text-slate-700">Restaurant documents</div>
-                    <div className="text-xs text-slate-400">PAN, GST, FSSAI, bank</div>
-                  </div>
-                </button>
-              </div>
-            </div>
-          </aside>
-
-          {/* Main */}
-          <section className="col-span-12 lg:col-span-9 space-y-8">
+    <>
+      <OnboardShell currentStep={2} steps={steps}>
             {/* Upload your menu */}
             <div
               className={`bg-white rounded-2xl p-8 shadow-sm border border-slate-100 transition-opacity ${
@@ -717,62 +692,75 @@ export default function MenuUploadPage() {
               </div>
             </div>
 
-            {/* Bottom actions */}
-            <div className="flex justify-end">
-              <button
-                onClick={handleSaveAndContinue}
-                className="px-6 py-3 bg-emerald-600 text-white rounded-xl shadow hover:bg-emerald-700"
-              >
-                Save & Continue
-              </button>
-            </div>
+            {/* Bottom actions - only show after successful parsing */}
+            {parsedCategories.length > 0 && (
+              <div className="flex justify-end">
+                <button
+                  onClick={handleSaveAndContinue}
+                  disabled={saving}
+                  className="px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? "Saving..." : "Save & Continue →"}
+                </button>
+              </div>
+            )}
 
             {error && <div className="text-sm text-red-600">{error}</div>}
-          </section>
+      </OnboardShell>
+
+      {/* Delete Category Confirmation Modal */}
+      {showDeleteCategoryModal !== null && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Remove Category?</h3>
+            </div>
+            <p className="text-slate-600 mb-6">Are you sure you want to remove this entire category? All items in it will be deleted.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteCategoryModal(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-medium hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRemoveCategory}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white font-medium hover:bg-red-700 transition"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
         </div>
-      </main>
+      )}
 
-      {/* Mobile sticky step bar (visible on small screens only) */}
-      <nav className="fixed bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 lg:hidden">
-        <div className="max-w-7xl mx-auto grid grid-cols-4">
-          <button
-            onClick={() => router.push("/onboard/details")}
-            className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 w-full text-slate-600"
-            aria-label="Restaurant information"
-          >
-            <span className="h-1 w-8 rounded-full bg-slate-200" />
-            <span>Info</span>
-          </button>
-
-          <button
-            onClick={() => {}}
-            className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 w-full text-sky-600"
-            aria-label="Menu and operational details"
-          >
-            <span className="h-1 w-8 rounded-full bg-sky-600" />
-            <span>Menu</span>
-          </button>
-
-          <button
-            onClick={goCuisineIfAllowed}
-            className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 w-full text-slate-600"
-            aria-label="Cuisine & Time slots"
-          >
-            <span className="h-1 w-8 rounded-full bg-slate-200" />
-            <span>Cuisine</span>
-          </button>
-
-          <button
-            onClick={() => router.push("/onboard/documents")}
-            className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 w-full text-slate-600"
-            aria-label="Restaurant documents"
-          >
-            <span className="h-1 w-8 rounded-full bg-slate-200" />
-            <span>Docs</span>
-          </button>
+      {/* Validation Modal */}
+      {showValidationModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center">
+                <svg className="w-5 h-5 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Complete This Step</h3>
+            </div>
+            <p className="text-slate-600 mb-6">Please complete Menu Info before continuing to Cuisine & Time slots.</p>
+            <button
+              onClick={() => setShowValidationModal(false)}
+              className="w-full px-4 py-2.5 rounded-xl bg-[#1c37b3] text-white font-medium hover:opacity-90 transition"
+            >
+              OK
+            </button>
+          </div>
         </div>
-        <div className="h-[calc(env(safe-area-inset-bottom,0px))]" />
-      </nav>
-    </div>
+      )}
+    </>
   );
 }

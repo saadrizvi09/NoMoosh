@@ -3,6 +3,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { OnboardShell, buildSteps } from "../components";
 
 /* --- Helpers --- */
 const emailIsValid = (email: string) => /^\S+@\S+\.\S+$/.test(email.trim());
@@ -183,6 +184,7 @@ export default function OnboardDetailsPage() {
 
   // Loading flag for submit
   const [saving, setSaving] = useState(false);
+  const [showValidationModal, setShowValidationModal] = useState<string | null>(null);
 
   // load draft + signup values (single setForm invocation to avoid overwrites)
   useEffect(() => {
@@ -445,7 +447,7 @@ export default function OnboardDetailsPage() {
         setActiveStep(2);
         router.push("/onboard/cuisine");
       } else {
-        alert("Please complete Restaurant information and Menu before continuing to Cuisine & Time slots.");
+        setShowValidationModal("Please complete Restaurant information and Menu before continuing to Cuisine & Time slots.");
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
       return;
@@ -460,7 +462,7 @@ export default function OnboardDetailsPage() {
         setActiveStep(3);
         router.push("/onboard/documents");
       } else {
-        alert("Please complete Restaurant information, Menu and Cuisine & Time slots before Documents.");
+        setShowValidationModal("Please complete Restaurant information, Menu and Cuisine & Time slots before Documents.");
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
       return;
@@ -504,84 +506,21 @@ export default function OnboardDetailsPage() {
     );
   };
 
+  const steps = buildSteps(1, {
+    details: isCompleted(),
+    menu: typeof window !== "undefined" && localStorage.getItem("menuCompleted") === "true",
+    cuisine: typeof window !== "undefined" && localStorage.getItem("cuisineTimesCompleted") === "true",
+    docs: typeof window !== "undefined" && localStorage.getItem("documentsCompleted") === "true",
+  }, {
+    1: () => handleSidebarClick(0),
+    2: () => handleSidebarClick(1),
+    3: () => handleSidebarClick(2),
+    4: () => handleSidebarClick(3),
+  });
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white">
-      {/* Top header */}
-      <header className="fixed top-0 inset-x-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="text-1xl font-bold text-sky-600">Nomoosh Partner</div>
-          <div className="text-sm text-sky-600">Need help? Call 7091863593</div>
-        </div>
-      </header>
-      <div className="h-18" />
-
-      <main className="max-w-7xl mx-auto px-6 pt-6 pb-24 lg:pb-8">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8">
-          {/* Sidebar (desktop/tablet) */}
-          <aside className="hidden lg:block col-span-3">
-            <div className="sticky top-8">
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                <h3 className="text-lg font-semibold mb-6">Complete your registration</h3>
-
-                <div className="space-y-4">
-                  {/* Restaurant information */}
-                  <button onClick={() => handleSidebarClick(0)} className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ${activeStep === 0 ? "ring-1 ring-sky-200 shadow" : "hover:shadow-sm"}`}>
-                    <div className={`h-9 w-9 rounded-full flex items-center justify-center ${isCompleted() ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-600"}`} aria-hidden>
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M7 2v10a2 2 0 0 1-2 2H3V2h4zm14 0v10a2 2 0 0 1-2 2h-2V2h4zM9 14h6v8H9v-8z" /></svg>
-                    </div>
-                    <div>
-                      <div className={`text-sm font-medium ${isCompleted() ? "text-emerald-600" : "text-slate-700"}`}>Restaurant information</div>
-                      <div className="text-xs text-slate-400">Basic details & location</div>
-                    </div>
-                  </button>
-
-                  {/* Menu */}
-                  <button onClick={() => handleSidebarClick(1)} className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ${activeStep === 1 ? "ring-1 ring-sky-200 shadow" : "hover:shadow-sm"}`}>
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center"><svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M3 4h18v2H3V4zm0 5h18v2H3V9zm0 5h18v6H3v-6z" /></svg></div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Menu & operational details</div>
-                      <div className="text-xs text-slate-400">Upload menu & images</div>
-                    </div>
-                  </button>
-
-                  {/* Cuisine & Time slots (NEW) */}
-                  <button onClick={() => handleSidebarClick(2)} className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ${activeStep === 2 ? "ring-1 ring-sky-200 shadow" : "hover:shadow-sm"}`}>
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l7 4v10l-7 4-7-4V7l7-4z" /></svg>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Cuisine & Time slots</div>
-                      <div className="text-xs text-slate-400">Cuisines, open days & timings</div>
-                    </div>
-                  </button>
-
-                  {/* Documents */}
-                  <button onClick={() => handleSidebarClick(3)} className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ${activeStep === 3 ? "ring-1 ring-sky-200 shadow" : "hover:shadow-sm"}`}>
-                    <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center"><svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M4 3h16v14H4zM4 21h16v2H4z" /></svg></div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Restaurant documents</div>
-                      <div className="text-xs text-slate-400">PAN, bank account details</div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-6 space-y-4">
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                  <div className="text-sm font-semibold">Documents required for registration</div>
-                  <div className="text-xs text-slate-400 mt-2">PAN, bank account details</div>
-                </div>
-
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                  <div className="text-sm">Did someone refer you to this platform?</div>
-                  <div className="text-sm text-sky-600 font-medium mt-1">Yes</div>
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          {/* Main form column */}
-          <section className="col-span-1 md:col-span-9 space-y-8 order-1 md:order-2">
+    <>
+      <OnboardShell currentStep={1} steps={steps}>
             {/* Restaurant info card */}
             <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100">
               <h2 className="text-2xl font-extrabold text-slate-800 mb-4">Restaurant information</h2>
@@ -702,64 +641,34 @@ export default function OnboardDetailsPage() {
 
             {/* Footer actions */}
             <div className="flex justify-end">
-              <button onClick={handleSubmitNext} disabled={saving} className={`px-6 py-3 bg-sky-600 text-white rounded-xl shadow hover:bg-sky-700 ${saving ? "opacity-70 cursor-not-allowed" : ""}`}>
-                {saving ? "Saving…" : "Next"}
+              <button onClick={handleSubmitNext} disabled={saving} className={`px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 transition ${saving ? "opacity-70 cursor-not-allowed" : ""}`}>
+                {saving ? "Saving…" : "Save & Continue →"}
               </button>
             </div>
-          </section>
-        </div>
-      </main>
+      </OnboardShell>
 
-      {/* Mobile step bar (sticky at bottom) */}
-      <nav className="fixed bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 lg:hidden">
-        <div className="max-w-7xl mx-auto grid grid-cols-4">
-          <button
-            onClick={() => handleSidebarClick(0)}
-            className={`px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 w-full ${
-              activeStep === 0 ? "text-sky-600" : "text-slate-600"
-            }`}
-            aria-label="Restaurant information"
-          >
-            <span className={`h-1 w-8 rounded-full ${activeStep === 0 ? "bg-sky-600" : "bg-slate-200"}`} />
-            <span>Info</span>
-          </button>
-
-          <button
-            onClick={() => handleSidebarClick(1)}
-            className={`px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 w-full ${
-              activeStep === 1 ? "text-sky-600" : "text-slate-600"
-            }`}
-            aria-label="Menu and operational details"
-          >
-            <span className={`h-1 w-8 rounded-full ${activeStep === 1 ? "bg-sky-600" : "bg-slate-200"}`} />
-            <span>Menu</span>
-          </button>
-
-          <button
-            onClick={() => handleSidebarClick(2)}
-            className={`px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 w-full ${
-              activeStep === 2 ? "text-sky-600" : "text-slate-600"
-            }`}
-            aria-label="Cuisine & Time slots"
-          >
-            <span className={`h-1 w-8 rounded-full ${activeStep === 2 ? "bg-sky-600" : "bg-slate-200"}`} />
-            <span>Cuisine</span>
-          </button>
-
-          <button
-            onClick={() => handleSidebarClick(3)}
-            className={`px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 w-full ${
-              activeStep === 3 ? "text-sky-600" : "text-slate-600"
-            }`}
-            aria-label="Restaurant documents"
-          >
-            <span className={`h-1 w-8 rounded-full ${activeStep === 3 ? "bg-sky-600" : "bg-slate-200"}`} />
-            <span>Docs</span>
-          </button>
-        </div>
-        {/* iOS safe area */}
-        <div className="h-[calc(env(safe-area-inset-bottom,0px))]" />
-      </nav>
-    </div>
-  );
-}
+      {/* Validation Modal */}
+        {showValidationModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-slate-900">Complete Previous Steps</h3>
+              </div>
+              <p className="text-slate-600 mb-6">{showValidationModal}</p>
+              <button
+                onClick={() => setShowValidationModal(null)}
+                className="w-full px-4 py-2.5 rounded-xl bg-[#1c37b3] text-white font-medium hover:opacity-90 transition"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }

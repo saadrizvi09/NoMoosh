@@ -3,122 +3,9 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { OnboardShell, buildSteps } from "../components";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
-
-function Sidebar({
-  stepCompleted0 = false,
-  stepCompleted1 = false,
-  onDetails,
-  onMenu,
-  onCuisine,
-  onTimeSlot,
-  onDocuments,
-}: {
-  stepCompleted0?: boolean;
-  stepCompleted1?: boolean;
-  onDetails: () => void;
-  onMenu: () => void;
-  onCuisine: () => void;
-  onTimeSlot: () => void;
-  onDocuments: () => void;
-}) {
-  return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-      <h3 className="text-lg font-semibold mb-6">Complete your registration</h3>
-
-      <div className="space-y-4">
-        {/* Step 0 - Restaurant info */}
-        <button
-          onClick={onDetails}
-          className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ${
-            stepCompleted0 ? "ring-1 ring-emerald-100 shadow" : "hover:shadow-sm"
-          }`}
-        >
-          <div
-            className={`h-9 w-9 rounded-full flex items-center justify-center ${
-              stepCompleted0 ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M7 2v10a2 2 0 0 1-2 2H3V2h4zm14 0v10a2 2 0 0 1-2 2h-2V2h4zM9 14h6v8H9v-8z" />
-            </svg>
-          </div>
-          <div>
-            <div
-              className={`text-sm font-medium ${
-                stepCompleted0 ? "text-emerald-600" : "text-slate-700"
-              }`}
-            >
-              Restaurant information
-            </div>
-            <div className="text-xs text-slate-400">Basic details and location</div>
-          </div>
-        </button>
-
-        {/* Step 1 - Menu */}
-        <button
-          onClick={onMenu}
-          className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ${
-            stepCompleted1 ? "ring-1 ring-emerald-100 shadow" : "ring-1 ring-sky-50 bg-sky-50"
-          }`}
-        >
-          <div
-            className={`h-9 w-9 rounded-full flex items-center justify-center ${
-              stepCompleted1 ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M3 4h18v2H3V4zm0 5h18v2H3V9zm0 5h18v6H3v-6z" />
-            </svg>
-          </div>
-          <div>
-            <div
-              className={`text-sm font-medium ${
-                stepCompleted1 ? "text-emerald-600" : "text-slate-700"
-              }`}
-            >
-              Menu and operational details
-            </div>
-            <div className="text-xs text-slate-400">Upload your menu & images</div>
-          </div>
-        </button>
-
-        {/* Step 2 - Cuisine */}
-        <button
-          onClick={onCuisine}
-          className="w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow hover:shadow-sm"
-        >
-          <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-            🍴
-          </div>
-          <div>
-            <div className="text-sm font-medium text-slate-700">Cuisine & Time slots</div>
-            <div className="text-xs text-slate-400">Select cuisine categories</div>
-          </div>
-        </button>
-
-        
-
-        {/* Step 4 - Documents (current) */}
-        <button
-          onClick={onDocuments}
-          className="w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-shadow ring-1 ring-sky-50 bg-sky-50"
-        >
-          <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4 3h16v14H4zM4 21h16v2H4z" />
-            </svg>
-          </div>
-          <div>
-            <div className="text-sm font-medium text-slate-700">Restaurant documents</div>
-            <div className="text-xs text-slate-400">PAN, bank account details</div>
-          </div>
-        </button>
-      </div>
-    </div>
-  );
-}
 
 const isPanValid = (pan: string) => /^[A-Z]{5}[0-9]{4}[A-Z]$/i.test(pan.trim());
 const isIfscValid = (ifsc: string) => /^[A-Z]{4}0[A-Z0-9]{6}$/i.test(ifsc.trim());
@@ -220,31 +107,15 @@ export default function DocumentsPage() {
    setShowCongratsModal(true); // skip → home
   };
 
+  const steps = buildSteps(4, {
+    details: step0Completed,
+    menu: step1Completed,
+    cuisine: typeof window !== "undefined" && localStorage.getItem("cuisineTimesCompleted") === "true",
+    docs: typeof window !== "undefined" && localStorage.getItem("documentsCompleted") === "true",
+  });
+
   return (
-     <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white">
-      <header className="fixed top-0 inset-x-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="text-xl font-bold text-sky-600">Nomoosh Partner</div>
-          <div className="text-sm text-sky-600">Need help? Call 7091863593</div>
-        </div>
-      </header>
-      <div className="h-18" />
-
-      <main className="max-w-7xl mx-auto px-6 py-8 pb-24 lg:pb-8">
-        <div className="grid grid-cols-12 gap-8">
-          <aside className="hidden lg:block col-span-3">
-            <Sidebar
-              stepCompleted0={step0Completed}
-              stepCompleted1={step1Completed}
-              onDetails={() => router.push("/onboard/details")}
-              onMenu={() => router.push("/onboard/menu")}
-              onCuisine={() => router.push("/onboard/cuisine")}
-              onTimeSlot={() => router.push("/onboard/time-slot")}
-              onDocuments={() => {}}
-            />
-          </aside>
-
-          <section className="col-span-12 lg:col-span-9">
+    <OnboardShell currentStep={4} steps={steps}>
             <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100">
               <h2 className="text-2xl font-extrabold text-slate-800 mb-2">Bank account details</h2>
               <p className="text-sm text-slate-500 mb-6">
@@ -328,58 +199,17 @@ export default function DocumentsPage() {
 
                 <button
                   onClick={handleVerify}
-                  className={`px-6 py-3 bg-emerald-600 text-white rounded-xl shadow hover:bg-emerald-700 ${
+                  className={`px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 transition ${
                     verifying ? "opacity-80 cursor-wait" : ""
                   }`}
                   disabled={verifying}
                 >
-                  {verifying ? "Verifying..." : "Verify bank details"}
+                  {verifying ? "Verifying..." : "Verify & Submit →"}
                 </button>
               </div>
 
               {submitError && <div className="mt-4 text-sm text-red-600">{submitError}</div>}
             </div>
-          </section>
-        </div>
-      </main>
-      {/* Mobile sticky step bar */}
-<nav className="fixed bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 lg:hidden">
-  <div className="max-w-7xl mx-auto grid grid-cols-4">
-    <button
-      onClick={() => router.push("/onboard/details")}
-      className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-    >
-      <span className="h-1 w-8 rounded-full bg-slate-200" />
-      Info
-    </button>
-
-    <button
-      onClick={() => router.push("/onboard/menu")}
-      className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-    >
-      <span className="h-1 w-8 rounded-full bg-slate-200" />
-      Menu
-    </button>
-
-    <button
-      onClick={() => router.push("/onboard/cuisine")}
-      className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-slate-600"
-    >
-      <span className="h-1 w-8 rounded-full bg-slate-200" />
-      Cuisine
-    </button>
-
-    <button
-      onClick={() => {}}
-      className="px-4 py-3 text-xs font-medium flex flex-col items-center gap-1 text-sky-700"
-    >
-      <span className="h-1 w-8 rounded-full bg-sky-500" />
-      Docs
-    </button>
-  </div>
-  {/* Safe-area spacer for iOS */}
-  <div className="h-[calc(env(safe-area-inset-bottom,0px))]" />
-</nav>
 
 
       {/* Confirmation modal */}
@@ -455,6 +285,6 @@ export default function DocumentsPage() {
           </div>
         </div>
       )}
-    </div>
+    </OnboardShell>
   );
 }

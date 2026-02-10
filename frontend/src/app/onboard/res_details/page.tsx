@@ -35,6 +35,13 @@ export default function Page() {
   // loading & errors
   const [loading, setLoading] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
+  const [oauthProcessing, setOauthProcessing] = useState(false);
+
+  // User menu state
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [loggedInUserName, setLoggedInUserName] = useState<string | null>(null);
+  const [loggedInUserEmail, setLoggedInUserEmail] = useState<string | null>(null);
+  const [showSignOutModal, setShowSignOutModal] = useState(false);
 
   // NEW: sticky/shrinking header state
   const [scrolled, setScrolled] = useState(false);
@@ -45,24 +52,86 @@ export default function Page() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Load logged-in user info
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const userId = localStorage.getItem("nomoosh_userId");
+      if (userId) {
+        setLoggedInUserName(localStorage.getItem("nomoosh_name"));
+        setLoggedInUserEmail(localStorage.getItem("nomoosh_email"));
+      }
+    }
+  }, []);
+
+  // Handle sign out — must also clear Supabase session to prevent auto-re-login
+  const handleSignOut = async () => {
+    setShowSignOutModal(false);
+    try { await supabase.auth.signOut(); } catch (e) { console.error("Supabase sign-out error:", e); }
+    localStorage.removeItem("nomoosh_userId");
+    localStorage.removeItem("nomoosh_name");
+    localStorage.removeItem("nomoosh_email");
+    localStorage.removeItem("nomoosh_phone");
+    localStorage.removeItem("nomoosh_token");
+    localStorage.removeItem("nomoosh_oauth_completed");
+    localStorage.removeItem("nomoosh_failed_session");
+    localStorage.removeItem("nomoosh_detailsForm");
+    localStorage.removeItem("detailsCompleted");
+    localStorage.removeItem("menuCompleted");
+    setLoggedInUserName(null);
+    setLoggedInUserEmail(null);
+    setShowUserMenu(false);
+    window.location.reload();
+  };
+
+  // Redirect if user already has an account
+  useEffect(() => {
+    const userId = localStorage.getItem("nomoosh_userId");
+    if (userId) {
+      console.log("User already logged in, redirecting to details");
+      router.replace("/onboard/details");
+    }
+  }, [router]);
+
   // Detect Google OAuth redirect — auto-login if a Supabase session exists
   useEffect(() => {
     const checkOAuthSession = async () => {
       try {
+        // Check if we've already processed OAuth successfully
+        const oauthCompleted = localStorage.getItem("nomoosh_oauth_completed");
+        if (oauthCompleted) {
+          console.log("OAuth already completed, skipping check");
+          return;
+        }
+
         const result = await supabase.auth.getSession();
-        if (!result?.data?.session?.user) return;
+        if (!result?.data?.session?.user) {
+          console.log("No OAuth session found");
+          return;
+        }
         const session = result.data.session;
+        console.log("OAuth session detected:", session.user.id);
 
         // Already have a userId → nothing to do
-        if (localStorage.getItem("nomoosh_userId")) return;
+        const existingUserId = localStorage.getItem("nomoosh_userId");
+        if (existingUserId) {
+          console.log("User already has userId, skipping OAuth setup");
+          localStorage.setItem("nomoosh_oauth_completed", "true");
+          return;
+        }
+
+        setOauthProcessing(true);
 
         // Prevent retry loop - check if we already failed this session
         const failedSessionId = localStorage.getItem("nomoosh_failed_session");
         if (failedSessionId === session.user.id) {
+          console.log("This session already failed before, signing out");
           // Already tried and failed - sign out to break the loop
           await supabase.auth.signOut();
           localStorage.removeItem("nomoosh_failed_session");
+          localStorage.removeItem("nomoosh_oauth_completed"); // Allow retry
           setModalError("Backend error occurred. Please try signing in again or contact support.");
+          setShowModal(true);
+          setOauthProcessing(false);
           return;
         }
 
@@ -78,25 +147,49 @@ export default function Page() {
           email: session.user.email ?? null,
           supabase_uid: session.user.id,
         };
+        console.log("Creating user on backend with payload:", payload);
         localStorage.setItem("nomoosh_token", session.access_token);
 
         const data = await createUserOnBackend(payload);
+        console.log("Backend response:", data);
         const userId = (data as any).userId ?? (data as any).user_id ?? null;
-        if (userId) {
-          localStorage.setItem("nomoosh_userId", userId);
-          localStorage.setItem("nomoosh_name", pendingName);
-          if (session.user.email) localStorage.setItem("nomoosh_email", session.user.email);
-          localStorage.removeItem("nomoosh_failed_session"); // Clear any old failure flag
-          router.push("/onboard/details");
+        if (!userId) {
+          console.error("Backend returned no userId:", data);
+          // Mark this session as failed to prevent retry loop
+          localStorage.setItem("nomoosh_failed_session", session.user.id);
+          localStorage.removeItem("nomoosh_oauth_completed"); // Allow retry
+          await supabase.auth.signOut();
+          setModalError("Account creation failed. Please try signing in again or contact support.");
+          setShowModal(true);
+          setOauthProcessing(false);
+          return;
         }
+        
+        localStorage.setItem("nomoosh_userId", userId);
+        localStorage.setItem("nomoosh_name", pendingName);
+        if (session.user.email) localStorage.setItem("nomoosh_email", session.user.email);
+        localStorage.removeItem("nomoosh_failed_session"); // Clear any old failure flag
+        localStorage.setItem("nomoosh_oauth_completed", "true"); // Mark OAuth as completed
+        
+        // Use replace instead of push to prevent back button issues
+        router.replace("/onboard/details");
       } catch (err: any) {
         console.error("Auto-login after OAuth failed:", err);
         // Mark this session as failed to prevent retry loop
-        const result = await supabase.auth.getSession();
-        if (result?.data?.session?.user) {
-          localStorage.setItem("nomoosh_failed_session", result.data.session.user.id);
+        try {
+          const result = await supabase.auth.getSession();
+          if (result?.data?.session?.user) {
+            localStorage.setItem("nomoosh_failed_session", result.data.session.user.id);
+            await supabase.auth.signOut();
+          }
+        } catch (signOutErr) {
+          console.error("Sign out failed:", signOutErr);
         }
-        setModalError(err?.message || "Auto-login failed. Please sign in manually.");
+        // Clear completion flag so user can try again
+        localStorage.removeItem("nomoosh_oauth_completed");
+        setModalError(err?.message || "Auto-login failed. Please sign in again or contact support.");
+        setShowModal(true);
+        setOauthProcessing(false);
       }
     };
     checkOAuthSession();
@@ -113,6 +206,7 @@ export default function Page() {
   async function createUserOnBackend(payload: { name: string; email?: string | null; phone?: string | null; supabase_uid?: string | null }) {
     if (!BACKEND_BASE) throw new Error("NEXT_PUBLIC_API_BASE not configured");
     const token = typeof window !== "undefined" ? localStorage.getItem("nomoosh_token") : null;
+    console.log("Calling backend:", `${BACKEND_BASE}/create_user`);
     const res = await fetch(`${BACKEND_BASE}/create_user`, {
       method: "POST",
       headers: {
@@ -123,6 +217,7 @@ export default function Page() {
     });
     if (!res.ok) {
       const txt = await res.text();
+      console.error("Backend error response:", txt);
       throw new Error(txt || `Create user failed (${res.status})`);
     }
     const data = await res.json();
@@ -174,6 +269,8 @@ export default function Page() {
   }
 
   function openRegisterModal() {
+    // Clear OAuth completion flag to allow retry
+    localStorage.removeItem("nomoosh_oauth_completed");
     setModalSub("emailEntry");
     setOtpStep("none");
     setOtpValue("");
@@ -304,9 +401,10 @@ export default function Page() {
             >
               <div className="flex items-center justify-between h-full">
                 {/* left brand */}
-                <div className="flex items-center">
-                  <a href="/" className="text-blue-400 font-semibold text-base sm:text-2xl hover:underline">
-                    nomoosh
+                <div className="flex items-center gap-2">
+                  <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-lg bg-[#1c37b3] text-white flex items-center justify-center font-extrabold text-xs sm:text-sm shadow-sm">N</div>
+                  <a href="/" className="text-white font-bold text-base sm:text-xl hover:opacity-90">
+                    Nomoosh
                   </a>
                 </div>
 
@@ -314,23 +412,124 @@ export default function Page() {
                 <nav className="hidden md:flex items-center gap-6 text-sm">
                   <a href="#how" className="text-white/90 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded px-1">Get started</a>
                   <a href="#faq" className="text-white/90 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded px-1">FAQ</a>
-                  <button
-                    onClick={openRegisterModal}
-                    className="group relative overflow-hidden bg-white text-gray-900 px-5 py-2 rounded-full font-medium shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-                  >
-                    <span className="absolute inset-0 translate-y-10 opacity-0 group-hover:opacity-100 group-hover:translate-y-0 transition-all bg-gradient-to-r from-amber-200 to-rose-200" />
-                    <span className="relative">Register your restaurant</span>
-                  </button>
+                  
+                  {/* Show user icon if logged in, otherwise show register button */}
+                  {loggedInUserName ? (
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowUserMenu(!showUserMenu)}
+                        className="flex items-center gap-2 hover:bg-white/10 rounded-full p-1.5 pr-3 transition-colors"
+                        aria-label="User menu"
+                      >
+                        <div className="h-8 w-8 rounded-full bg-white text-[#1c37b3] flex items-center justify-center font-semibold text-sm shadow">
+                          {loggedInUserName.charAt(0).toUpperCase()}
+                        </div>
+                        <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+
+                      {/* Dropdown Menu */}
+                      {showUserMenu && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-[60]" 
+                            onClick={() => setShowUserMenu(false)}
+                          />
+                          <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-200 py-2 z-[70]">
+                            <div className="px-4 py-3 border-b border-slate-100">
+                              <div className="font-medium text-slate-900 text-sm">{loggedInUserName}</div>
+                              {loggedInUserEmail && <div className="text-xs text-slate-500 mt-0.5">{loggedInUserEmail}</div>}
+                            </div>
+                            <a
+                              href="/onboard/details"
+                              className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                            >
+                              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                              Continue Registration
+                            </a>
+                            <button
+                              onClick={handleSignOut}
+                              className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                            >
+                              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                              Sign out
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={openRegisterModal}
+                      className="group relative overflow-hidden bg-white text-gray-900 px-5 py-2 rounded-full font-medium shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                    >
+                      <span className="absolute inset-0 translate-y-10 opacity-0 group-hover:opacity-100 group-hover:translate-y-0 transition-all bg-gradient-to-r from-amber-200 to-rose-200" />
+                      <span className="relative">Register your restaurant</span>
+                    </button>
+                  )}
                 </nav>
 
-                {/* mobile CTA */}
-                <button
-                  onClick={openRegisterModal}
-                  className="md:hidden bg-white/95 text-gray-900 px-4 py-2 rounded-full font-medium shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-                  aria-label="Register"
-                >
-                  Register
-                </button>
+                {/* mobile CTA or user icon */}
+                {loggedInUserName ? (
+                  <div className="md:hidden relative">
+                    <button
+                      onClick={() => setShowUserMenu(!showUserMenu)}
+                      className="flex items-center gap-2 hover:bg-white/10 rounded-full p-1 transition-colors"
+                      aria-label="User menu"
+                    >
+                      <div className="h-8 w-8 rounded-full bg-white text-[#1c37b3] flex items-center justify-center font-semibold text-sm shadow">
+                        {loggedInUserName.charAt(0).toUpperCase()}
+                      </div>
+                    </button>
+
+                    {/* Mobile Dropdown Menu */}
+                    {showUserMenu && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-[60]" 
+                          onClick={() => setShowUserMenu(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-200 py-2 z-[70]">
+                          <div className="px-4 py-3 border-b border-slate-100">
+                            <div className="font-medium text-slate-900 text-sm">{loggedInUserName}</div>
+                            {loggedInUserEmail && <div className="text-xs text-slate-500 mt-0.5">{loggedInUserEmail}</div>}
+                          </div>
+                          <a
+                            href="/onboard/details"
+                            className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                          >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                            Continue Registration
+                          </a>
+                          <button
+                            onClick={() => setShowSignOutModal(true)}
+                            className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                          >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                            Sign out
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={openRegisterModal}
+                    className="md:hidden bg-white/95 text-gray-900 px-4 py-2 rounded-full font-medium shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                    aria-label="Register"
+                  >
+                    Register
+                  </button>
+                )}
               </div>
             </div>
           </header>
@@ -357,7 +556,7 @@ export default function Page() {
               <div className="mt-8 flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <button
                   onClick={openRegisterModal}
-                  className="relative inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white px-6 py-3 rounded-xl font-semibold shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                  className="relative inline-flex items-center justify-center gap-2 bg-[#1c37b3] hover:opacity-90 text-white px-6 py-3 rounded-xl font-semibold shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
                 >
                   <span className="i-heroicon-qr-code" aria-hidden />
                   Register your restaurant
@@ -515,7 +714,7 @@ export default function Page() {
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white text-sm font-bold">1</span>
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#1c37b3] text-white text-sm font-bold">1</span>
                 <h4 className="text-lg font-semibold">Register your restaurant</h4>
               </div>
               <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 rounded">✕</button>
@@ -578,7 +777,7 @@ export default function Page() {
                   <input
                     value={otpValue}
                     onChange={(e) => setOtpValue(e.target.value)}
-                    className="w-full border border-gray-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 rounded-lg p-3 mt-1 tracking-[0.3em] text-center font-semibold text-sm"
+                    className="w-full border border-gray-300 focus:border-[#1c37b3] focus:ring-2 focus:ring-blue-200 rounded-lg p-3 mt-1 tracking-[0.3em] text-center font-semibold text-sm"
                     placeholder="0 0 0 0 0 0 0 0"
                     inputMode="numeric"
                     maxLength={8}
@@ -606,6 +805,50 @@ export default function Page() {
           </motion.div>
         </div>
       )}
+
+      {/* OAuth Processing Overlay */}
+      {oauthProcessing && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl p-8 shadow-2xl text-center max-w-sm mx-4">
+            <div className="flex justify-center mb-4">
+              <Spinner />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Signing you in...</h3>
+            <p className="text-sm text-gray-600">Please wait while we set up your account</p>
+          </div>
+        </div>
+      )}
+
+      {/* Sign Out Confirmation Modal */}
+      {showSignOutModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Sign Out?</h3>
+            </div>
+            <p className="text-slate-600 mb-6">Are you sure you want to sign out? You'll need to log in again to continue.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSignOutModal(false)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-medium hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSignOut}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white font-medium hover:bg-red-700 transition"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -630,7 +873,7 @@ function Feature({
       whileTap={{ scale: 0.98 }}     // 👈 shrink a bit on tap
       className="bg-white rounded-2xl p-6 shadow-sm ring-1 ring-gray-100 text-left cursor-pointer"
     >
-      <div className="mb-4 inline-flex items-center justify-center w-16 h-16 rounded-xl bg-sky-50 text-sky-600">
+      <div className="mb-4 inline-flex items-center justify-center w-16 h-16 rounded-xl bg-blue-50 text-[#1c37b3]">
         {icon}
       </div>
       <h4 className="font-semibold text-lg mb-2 tracking-tight">{title}</h4>
@@ -649,7 +892,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   const { className = "", ...rest } = props;
   return (
     <input
-      className={`w-full border border-gray-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 rounded-lg p-3 mt-1 placeholder:text-gray-400 ${className}`}
+      className={`w-full border border-gray-300 focus:border-[#1c37b3] focus:ring-2 focus:ring-blue-200 rounded-lg p-3 mt-1 placeholder:text-gray-400 ${className}`}
       {...rest}
     />
   );
@@ -658,7 +901,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
 function PrimaryButton({ children, className = "", ...rest }: any) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${className}`}
+      className={`inline-flex items-center justify-center gap-2 bg-[#1c37b3] hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${className}`}
       {...rest}
     >
       {children}
