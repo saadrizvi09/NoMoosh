@@ -6,7 +6,8 @@ import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 
 const BRAND = "#1c37b3";
 const API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
-const FRONTEND = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+// Use production URL for QR codes so they work from anywhere
+const FRONTEND = process.env.NEXT_PUBLIC_FRONTEND_URL || "https://no-moosh.vercel.app";
 
 interface MenuItem {
   id: number;
