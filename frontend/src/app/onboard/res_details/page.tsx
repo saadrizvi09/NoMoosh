@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
+import { restoreOnboardingStatus } from "@/lib/onboardingStatus";
 
 /*
   Landing page (hero, CTAs, overlapping info card, features, FAQ).
@@ -87,8 +88,20 @@ export default function Page() {
   useEffect(() => {
     const userId = localStorage.getItem("nomoosh_userId");
     if (userId) {
-      console.log("User already logged in, redirecting to details");
-      router.replace("/onboard/details");
+      // Check if registration is already complete before redirecting
+      restoreOnboardingStatus().then((status) => {
+        if (status.completed) {
+          // Registration is done — go to staff signup
+          if (status.restaurant_id) {
+            localStorage.setItem("pending_restaurant_id", String(status.restaurant_id));
+          }
+          console.log("Registration already complete, redirecting to staff signup");
+          router.replace("/staff/signup");
+        } else {
+          console.log("User logged in, resuming onboarding");
+          router.replace("/onboard/details");
+        }
+      });
     }
   }, [router]);
 

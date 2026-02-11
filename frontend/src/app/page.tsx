@@ -107,6 +107,12 @@ export default function LandingPage() {
             >
               Contact
             </button>
+            <button
+              onClick={() => router.push("/staff/login")}
+              className="hover:text-slate-900"
+            >
+              Staff Login
+            </button>
           </nav>
 
           {/* Right: User icon or Join CTA */}

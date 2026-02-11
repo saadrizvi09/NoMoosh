@@ -10,11 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import FRONTEND_URL
 from routers import auth, onboarding, menu, geocode
+from routers import staff, tables, orders, ws
 
 app = FastAPI(
     title="Nomoosh API",
     description="Restaurant onboarding & ordering platform",
-    version="1.0.0",
+    version="2.0.0",
 )
 
 # ── CORS ──────────────────────────────────────────────────
@@ -35,6 +36,10 @@ app.include_router(auth.router)
 app.include_router(onboarding.router)
 app.include_router(menu.router)
 app.include_router(geocode.router)
+app.include_router(staff.router)
+app.include_router(tables.router)
+app.include_router(orders.router)
+app.include_router(ws.router)
 
 
 # ── Health & root ─────────────────────────────────────────

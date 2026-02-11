@@ -104,7 +104,18 @@ export default function DocumentsPage() {
   };
 
   const handleGoHome = () => {
-    window.location.href = "/";
+    // Clear onboarding state
+    localStorage.removeItem("detailsCompleted");
+    localStorage.removeItem("menuCompleted");
+    localStorage.removeItem("cuisineTimesCompleted");
+    localStorage.removeItem("documentsCompleted");
+    
+    // Redirect to staff signup with restaurant ID
+    const restaurantId = localStorage.getItem("nomoosh_userId") ?? localStorage.getItem("restaurantId");
+    if (restaurantId) {
+      localStorage.setItem("pending_restaurant_id", restaurantId);
+    }
+    router.push("/staff/signup");
   };
 
   const handleSkip = () => {
@@ -266,24 +277,31 @@ export default function DocumentsPage() {
       {showCongratsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-lg border text-center">
+            <div className="text-5xl mb-4">🎉</div>
             <h3 className="text-2xl font-bold text-slate-800">
-              Congratulations — you are now a Nomoosh partner!
+              Restaurant Registered Successfully!
             </h3>
-            <p className="text-slate-600 mt-2">
-              Your bank details have been submitted successfully.
+            <p className="text-slate-600 mt-3 mb-2">
+              Your restaurant details have been saved.
             </p>
+            <div className="bg-blue-50 rounded-xl p-4 mt-4 mb-4 text-left">
+              <p className="text-sm font-semibold text-blue-900 mb-1">📌 Next Step:</p>
+              <p className="text-sm text-blue-700">
+                Create your <strong>Owner Account</strong> to access your dashboard and manage tables, menu, and staff.
+              </p>
+            </div>
             <div className="mt-4 flex gap-3 justify-center">
               <button
                 onClick={() => setShowCongratsModal(false)}
-                className="px-4 py-2 border border-slate-200 rounded-md text-slate-700 hover:shadow-sm"
+                className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 hover:shadow-sm"
               >
                 Close
               </button>
               <button
                 onClick={handleGoHome}
-                className="px-6 py-2 bg-sky-600 text-white rounded-md shadow hover:bg-sky-700"
+                className="px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 font-semibold"
               >
-                Go to home
+                Create Owner Account →
               </button>
             </div>
           </div>

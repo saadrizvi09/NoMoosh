@@ -1,17 +1,90 @@
 """Onboarding router — multi-step restaurant registration.
 
 Endpoints:
+  GET  /check-onboarding-status   → check which steps are completed
   POST /register-restaurant_pg1   → save restaurant details & location (step 1)
   POST /save-cuisines-and-times   → save cuisines + operating hours   (step 3)
   POST /save-documents            → save bank/PAN + finalise          (step 4)
 """
 
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from supabase_client import get_supabase
 
 router = APIRouter(tags=["onboarding"])
+
+
+# ═══════════════════════════════════════════════════════════
+# CHECK ONBOARDING STATUS
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/check-onboarding-status")
+async def check_onboarding_status(user_id: int = Query(...)):
+    """Check which onboarding steps have data in the database."""
+    sb = get_supabase()
+    
+    try:
+        # FIRST: Check if restaurant is already fully registered (permanent tables)
+        rest_res = sb.table("restaurants").select("id").eq("accounts_id", user_id).limit(1).execute()
+        if rest_res.data:
+            # Registration is fully complete — all steps done
+            return {
+                "details": True,
+                "menu": True,
+                "cuisine": True,
+                "documents": True,
+                "completed": True,
+                "restaurant_id": rest_res.data[0]["id"],
+            }
+
+        # Otherwise check temp tables for in-progress onboarding
+        # Check step 1: Restaurant details (temp table)
+        temp_res = sb.table("temp").select("user_id").eq("user_id", user_id).execute()
+        details_completed = len(temp_res.data or []) > 0
+        
+        # Check step 2: Menu items (temp_menu table)
+        menu_res = sb.table("temp_menu").select("id").eq("user_id", user_id).limit(1).execute()
+        menu_completed = len(menu_res.data or []) > 0
+        
+        # Check step 3: Cuisines and timing (temp_rest_cuisines or temp_rest_timing)
+        cuisine_res = sb.table("temp_rest_cuisines").select("user_id").eq("user_id", user_id).limit(1).execute()
+        timing_res = sb.table("temp_rest_timing").select("user_id").eq("user_id", user_id).limit(1).execute()
+        cuisine_completed = len(cuisine_res.data or []) > 0 or len(timing_res.data or []) > 0
+        
+        return {
+            "details": details_completed,
+            "menu": menu_completed,
+            "cuisine": cuisine_completed,
+            "documents": False,
+            "completed": False,
+        }
+    except Exception as e:
+        # If tables don't exist or query fails, return all false
+        return {
+            "details": False,
+            "menu": False,
+            "cuisine": False,
+            "documents": False,
+            "completed": False,
+        }
+
+
+@router.get("/get-onboarding-data")
+async def get_onboarding_data(user_id: int = Query(...)):
+    """Fetch saved onboarding data from temp tables to restore form state."""
+    sb = get_supabase()
+    
+    try:
+        # Fetch restaurant details from temp table
+        temp_res = sb.table("temp").select("*").eq("user_id", user_id).execute()
+        temp_data = temp_res.data[0] if temp_res.data else None
+        
+        return {
+            "temp": temp_data,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch onboarding data: {e}")
 
 
 # ═══════════════════════════════════════════════════════════

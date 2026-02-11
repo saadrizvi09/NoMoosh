@@ -189,7 +189,16 @@ export default function OnboardDetailsPage() {
 
   // Restore onboarding status from database on mount
   useEffect(() => {
-    restoreOnboardingStatus();
+    restoreOnboardingStatus().then((status) => {
+      // If registration is already complete, redirect to staff signup
+      if (status.completed) {
+        if (status.restaurant_id) {
+          localStorage.setItem("pending_restaurant_id", String(status.restaurant_id));
+        }
+        router.replace("/staff/signup");
+        return;
+      }
+    });
     
     // Also restore form data from database
     restoreOnboardingData().then((data) => {

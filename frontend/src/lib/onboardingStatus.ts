@@ -37,6 +37,11 @@ export async function restoreOnboardingStatus() {
       localStorage.setItem("documentsCompleted", "true");
     }
 
+    // If registration is fully complete, store restaurant_id
+    if (status.completed && status.restaurant_id) {
+      localStorage.setItem("nomoosh_restaurant_id", String(status.restaurant_id));
+    }
+
     return status;
   } catch (error) {
     console.error("Failed to restore onboarding status:", error);
