@@ -96,7 +96,7 @@ class MenuItemUpdate(BaseModel):
 # ═══════════════════════════════════════════════════════════
 
 def _enrich_cart(sb, session_id: str) -> dict:
-    """Return enriched cart data for a session."""
+    """Return enriched cart data for a session (single batch query)."""
     cart = sb.table("carts").select("id, version").eq("session_id", session_id).execute()
     if not cart.data:
         return {"items": [], "version": 0, "total": 0}
@@ -109,12 +109,18 @@ def _enrich_cart(sb, session_id: str) -> dict:
         .order("created_at")
         .execute()
     )
+    if not items.data:
+        return {"items": [], "version": cart.data[0]["version"], "total": 0}
+
+    # Batch-fetch all menu items at once instead of N queries
+    menu_ids = list({i["menu_item_id"] for i in items.data})
+    menu_rows = sb.table("menu").select("id, dish_name, price, category, image_link, variant_name").in_("id", menu_ids).execute()
+    menu_map = {m["id"]: m for m in (menu_rows.data or [])}
 
     enriched = []
-    for item in items.data or []:
-        mi = sb.table("menu").select("dish_name, price, category, image_link, variant_name").eq("id", item["menu_item_id"]).execute()
-        if mi.data:
-            m = mi.data[0]
+    for item in items.data:
+        m = menu_map.get(item["menu_item_id"])
+        if m:
             enriched.append({
                 **item,
                 "dish_name": m["dish_name"],
@@ -348,12 +354,15 @@ async def confirm_payment(data: PaymentConfirmRequest):
     if not cart_items.data:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
-    # Calculate total + build order items
+    # Batch-fetch all menu prices at once
+    menu_ids = list({ci["menu_item_id"] for ci in cart_items.data})
+    menu_rows = sb.table("menu").select("id, price").in_("id", menu_ids).execute()
+    price_map = {m["id"]: m["price"] for m in (menu_rows.data or [])}
+
     total = 0
     order_items_data = []
     for ci in cart_items.data:
-        mi = sb.table("menu").select("price").eq("id", ci["menu_item_id"]).execute()
-        price = mi.data[0]["price"] if mi.data else 0
+        price = price_map.get(ci["menu_item_id"], 0)
         total += price * ci["quantity"]
         order_items_data.append({
             "menu_item_id": ci["menu_item_id"],
@@ -432,26 +441,46 @@ async def get_restaurant_orders(restaurant_id: int, authorization: str = Header(
         .execute()
     )
 
+    if not orders.data:
+        return []
+
+    # Batch-fetch all order_items, sessions, and menu items in bulk
+    order_ids = [o["id"] for o in orders.data]
+    session_ids = list({o["session_id"] for o in orders.data})
+
+    all_items = sb.table("order_items").select("*").in_("order_id", order_ids).execute()
+    all_sessions = sb.table("sessions").select("id, chef_eta_minutes, chef_eta_set_at, status").in_("id", session_ids).execute()
+
+    # Build lookup maps
+    items_by_order: dict[str, list] = {}
+    menu_ids_needed: set[int] = set()
+    for it in (all_items.data or []):
+        items_by_order.setdefault(it["order_id"], []).append(it)
+        menu_ids_needed.add(it["menu_item_id"])
+
+    menu_rows = sb.table("menu").select("id, dish_name, category, variant_name").in_("id", list(menu_ids_needed)).execute() if menu_ids_needed else type("R", (), {"data": []})()
+    menu_map = {m["id"]: m for m in (menu_rows.data or [])}
+    session_map = {s["id"]: s for s in (all_sessions.data or [])}
+
     enriched = []
-    for order in orders.data or []:
-        items = sb.table("order_items").select("*").eq("order_id", order["id"]).execute()
+    for order in orders.data:
         item_details = []
-        for it in items.data or []:
-            mi = sb.table("menu").select("dish_name, category, variant_name").eq("id", it["menu_item_id"]).execute()
+        for it in items_by_order.get(order["id"], []):
+            m = menu_map.get(it["menu_item_id"])
             item_details.append({
                 **it,
-                "dish_name": mi.data[0]["dish_name"] if mi.data else "Unknown",
-                "category": mi.data[0].get("category") if mi.data else None,
-                "variant_name": mi.data[0].get("variant_name") if mi.data else "Regular",
+                "dish_name": m["dish_name"] if m else "Unknown",
+                "category": m.get("category") if m else None,
+                "variant_name": m.get("variant_name") if m else "Regular",
             })
 
-        session = sb.table("sessions").select("chef_eta_minutes, chef_eta_set_at, status").eq("id", order["session_id"]).execute()
+        s = session_map.get(order["session_id"])
         enriched.append({
             **order,
             "items": item_details,
-            "chef_eta_minutes": session.data[0].get("chef_eta_minutes") if session.data else None,
-            "chef_eta_set_at": session.data[0].get("chef_eta_set_at") if session.data else None,
-            "session_status": session.data[0].get("status") if session.data else None,
+            "chef_eta_minutes": s.get("chef_eta_minutes") if s else None,
+            "chef_eta_set_at": s.get("chef_eta_set_at") if s else None,
+            "session_status": s.get("status") if s else None,
         })
 
     return enriched

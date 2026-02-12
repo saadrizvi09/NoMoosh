@@ -30,19 +30,18 @@ interface CartItem {
 
 type Phase =
   | "loading"
-  | "waiting"      // table inactive — waiting for activation
-  | "menu"         // active — browsing menu, adding to cart
-  | "payment"      // payment locked — processing
-  | "confirmed"    // payment confirmed — waiting for chef ETA
-  | "countdown"    // chef set ETA — countdown running
-  | "done";        // countdown finished
+  | "waiting"
+  | "menu"
+  | "payment"
+  | "confirmed"
+  | "countdown"
+  | "done";
 
 /* ── Page ──────────────────────────────────────────────── */
 export default function TablePage() {
   const params = useParams();
   const qrToken = params.token as string;
 
-  // Core state
   const [phase, setPhase] = useState<Phase>("loading");
   const [restaurantName, setRestaurantName] = useState("");
   const [tableNumber, setTableNumber] = useState("");
@@ -63,9 +62,17 @@ export default function TablePage() {
   const [error, setError] = useState("");
   const [paymentCountdown, setPaymentCountdown] = useState(0);
   const [activeCategory, setActiveCategory] = useState("");
+  const [cartBusy, setCartBusy] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const wsConnectedRef = useRef(false);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   /* ── 1. Scan / Check table ───────────────────────────── */
   const checkTable = useCallback(async () => {
@@ -148,74 +155,109 @@ export default function TablePage() {
     return () => clearInterval(id);
   }, [phase, checkTable]);
 
-  /* ── 3. WebSocket connection ─────────────────────────── */
+  /* ── 3. WebSocket connection with auto-reconnect ──────── */
   useEffect(() => {
     if (!sessionId || phase === "loading" || phase === "waiting") return;
 
-    const wsUrl = `${getWsBase()}/ws/${sessionId}`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let alive = true;
+    let pingInterval: NodeJS.Timeout | null = null;
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "cart_update" && msg.cart) {
-          setCart(msg.cart.items || []);
-          setCartTotal(msg.cart.total || 0);
-          setCartVersion(msg.cart.version || 0);
-        } else if (msg.type === "payment_locked") {
-          setPaymentLocked(true);
-          setPhase("payment");
-        } else if (msg.type === "payment_unlocked") {
-          setPaymentLocked(false);
-          setPhase("menu");
-        } else if (msg.type === "order_confirmed") {
-          setOrderId(msg.order_id);
-          setOrderTotal(msg.total);
-          setPhase("confirmed");
-        } else if (msg.type === "chef_eta") {
-          setChefEtaMinutes(msg.minutes);
-          setChefEtaSetAt(msg.set_at);
-          setPhase("countdown");
+    const connect = () => {
+      if (!alive || !mountedRef.current) return;
+      const wsUrl = `${getWsBase()}/ws/${sessionId}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        wsConnectedRef.current = true;
+        // Send ping every 25s to keep connection alive
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 25000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "pong") return; // keepalive response
+          if (msg.type === "cart_update" && msg.cart) {
+            setCart(msg.cart.items || []);
+            setCartTotal(msg.cart.total || 0);
+            setCartVersion(msg.cart.version || 0);
+          } else if (msg.type === "payment_locked") {
+            setPaymentLocked(true);
+            setPhase("payment");
+          } else if (msg.type === "payment_unlocked") {
+            setPaymentLocked(false);
+            setPhase("menu");
+          } else if (msg.type === "order_confirmed") {
+            setOrderId(msg.order_id);
+            setOrderTotal(msg.total);
+            setPhase("confirmed");
+          } else if (msg.type === "chef_eta") {
+            setChefEtaMinutes(msg.minutes);
+            setChefEtaSetAt(msg.set_at);
+            setPhase("countdown");
+          }
+        } catch { }
+      };
+
+      ws.onclose = () => {
+        wsConnectedRef.current = false;
+        if (pingInterval) clearInterval(pingInterval);
+        // Auto-reconnect after 2s
+        if (alive && mountedRef.current) {
+          reconnectTimerRef.current = setTimeout(connect, 2000);
         }
-      } catch { }
+      };
+
+      ws.onerror = () => {
+        ws.close(); // triggers onclose → reconnect
+      };
     };
 
-    ws.onclose = () => {
-      // Reconnect after 3s
-      setTimeout(() => {
-        if (wsRef.current === ws) {
-          wsRef.current = null;
-        }
-      }, 3000);
-    };
+    connect();
 
-    return () => { ws.close(); };
+    return () => {
+      alive = false;
+      if (pingInterval) clearInterval(pingInterval);
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      wsRef.current?.close();
+      wsConnectedRef.current = false;
+    };
   }, [sessionId, phase]);
 
-  /* ── 4. Poll cart as backup (every 2s) ───────────────── */
+  /* ── 4. Poll cart as fallback ONLY when WS is down ───── */
   useEffect(() => {
     if (!sessionId || phase !== "menu") return;
+    // Initial cart fetch
     const fetchCart = async () => {
       try {
         const data = await apiGet(`/cart/${sessionId}`);
-        setCart(data.items || []);
-        setCartTotal(data.total || 0);
-        setCartVersion(data.version || 0);
+        if (mountedRef.current) {
+          setCart(data.items || []);
+          setCartTotal(data.total || 0);
+          setCartVersion(data.version || 0);
+        }
       } catch { }
     };
     fetchCart();
-    const id = setInterval(fetchCart, 2000);
-    pollRef.current = id;
+    // Only poll if WebSocket is not connected — poll every 5s (was 2s)
+    const id = setInterval(() => {
+      if (!wsConnectedRef.current) fetchCart();
+    }, 5000);
     return () => clearInterval(id);
   }, [sessionId, phase]);
 
-  /* ── 5. Poll session status for payment/ETA ──────────── */
+  /* ── 5. Poll session status for payment/ETA (slow poll) */
   useEffect(() => {
     if (!sessionId || (phase !== "payment" && phase !== "confirmed")) return;
     const poll = async () => {
       try {
         const status = await apiGet(`/sessions/${sessionId}/status`);
+        if (!mountedRef.current) return;
         if (status.payment_lock && phase !== "payment") {
           setPaymentLocked(true);
           setPhase("payment");
@@ -239,7 +281,8 @@ export default function TablePage() {
       } catch { }
     };
     poll();
-    const id = setInterval(poll, 3000);
+    // Poll every 5s instead of 3s (WS handles real-time)
+    const id = setInterval(poll, 5000);
     return () => clearInterval(id);
   }, [sessionId, phase]);
 
@@ -263,9 +306,10 @@ export default function TablePage() {
     return () => clearInterval(id);
   }, [phase]);
 
-  /* ── Cart actions ────────────────────────────────────── */
+  /* ── Cart actions (with busy guard) ──────────────────── */
   const addToCart = async (menuItemId: number) => {
-    if (paymentLocked) return;
+    if (paymentLocked || cartBusy) return;
+    setCartBusy(true);
     try {
       const result = await apiPost("/cart/add", {
         session_id: sessionId,
@@ -277,24 +321,29 @@ export default function TablePage() {
       setCartTotal(result.total || 0);
       setCartVersion(result.version || 0);
     } catch { }
+    setCartBusy(false);
   };
 
   const removeFromCart = async (cartItemId: string) => {
-    if (paymentLocked) return;
+    if (paymentLocked || cartBusy) return;
+    setCartBusy(true);
     try {
       const result = await apiPost("/cart/remove", { session_id: sessionId, cart_item_id: cartItemId });
       setCart(result.items || []);
       setCartTotal(result.total || 0);
     } catch { }
+    setCartBusy(false);
   };
 
   const updateQty = async (cartItemId: string, qty: number) => {
-    if (paymentLocked) return;
+    if (paymentLocked || cartBusy) return;
+    setCartBusy(true);
     try {
       const result = await apiPost("/cart/update-quantity", { session_id: sessionId, cart_item_id: cartItemId, quantity: qty });
       setCart(result.items || []);
       setCartTotal(result.total || 0);
     } catch { }
+    setCartBusy(false);
   };
 
   /* ── Payment actions ─────────────────────────────────── */

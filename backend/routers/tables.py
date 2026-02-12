@@ -82,6 +82,38 @@ async def delete_table(table_id: str, authorization: str = Header(None)):
     if table.data[0]["restaurant_id"] != payload["restaurant_id"]:
         raise HTTPException(status_code=403, detail="Not your restaurant")
 
+    # Get all sessions for this table
+    sessions = sb.table("sessions").select("id").eq("table_id", table_id).execute()
+    session_ids = [s["id"] for s in sessions.data] if sessions.data else []
+    
+    if session_ids:
+        # Get all carts for these sessions
+        carts = sb.table("carts").select("id").in_("session_id", session_ids).execute()
+        cart_ids = [c["id"] for c in carts.data] if carts.data else []
+        
+        # Get all orders for these sessions
+        orders = sb.table("orders").select("id").in_("session_id", session_ids).execute()
+        order_ids = [o["id"] for o in orders.data] if orders.data else []
+        
+        # Cascade delete in proper order:
+        # 1. Delete cart_items
+        if cart_ids:
+            sb.table("cart_items").delete().in_("cart_id", cart_ids).execute()
+        # 2. Delete order_items
+        if order_ids:
+            sb.table("order_items").delete().in_("order_id", order_ids).execute()
+        # 3. Delete orders
+        if order_ids:
+            sb.table("orders").delete().in_("id", order_ids).execute()
+        # 4. Delete carts
+        if cart_ids:
+            sb.table("carts").delete().in_("id", cart_ids).execute()
+        # 5. Delete participants
+        sb.table("participants").delete().in_("session_id", session_ids).execute()
+        # 6. Delete sessions
+        sb.table("sessions").delete().in_("id", session_ids).execute()
+    
+    # Finally delete the table
     sb.table("restaurant_tables").delete().eq("id", table_id).execute()
     return {"message": "Table deleted"}
 

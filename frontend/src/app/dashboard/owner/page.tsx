@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 
@@ -45,6 +45,9 @@ export default function OwnerDashboard() {
   const [tables, setTables] = useState<Table[]>([]);
   const [newTableNumber, setNewTableNumber] = useState("");
   const [newTableCapacity, setNewTableCapacity] = useState(4);
+  const [tableActionBusy, setTableActionBusy] = useState<string | null>(null);
+  const fetchingMenuRef = useRef(false);
+  const fetchingTablesRef = useRef(false);
 
   useEffect(() => {
     const t = localStorage.getItem("nomoosh_staff_token") || "";
@@ -58,13 +61,17 @@ export default function OwnerDashboard() {
   }, [router]);
 
   const fetchMenu = useCallback(async () => {
-    if (!token || !restaurantId) return;
+    if (!token || !restaurantId || fetchingMenuRef.current) return;
+    fetchingMenuRef.current = true;
     try { setMenuItems(await apiGet(`/menu/restaurant/${restaurantId}`, token)); } catch { }
+    fetchingMenuRef.current = false;
   }, [token, restaurantId]);
 
   const fetchTables = useCallback(async () => {
-    if (!token || !restaurantId) return;
+    if (!token || !restaurantId || fetchingTablesRef.current) return;
+    fetchingTablesRef.current = true;
     try { setTables(await apiGet(`/tables/restaurant/${restaurantId}`, token)); } catch { }
+    fetchingTablesRef.current = false;
   }, [token, restaurantId]);
 
   useEffect(() => { fetchMenu(); fetchTables(); }, [fetchMenu, fetchTables]);
@@ -100,25 +107,41 @@ export default function OwnerDashboard() {
   };
 
   const addTable = async () => {
-    if (!newTableNumber) return;
+    if (!newTableNumber || tableActionBusy) return;
+    setTableActionBusy("add");
     try {
       await apiPost("/tables", { restaurant_id: restaurantId, number: newTableNumber, capacity: newTableCapacity }, token);
       setNewTableNumber("");
       setNewTableCapacity(4);
       fetchTables();
     } catch { }
+    setTableActionBusy(null);
   };
 
   const deleteTable = async (id: string) => {
+    setTableActionBusy(id);
     try { await apiDelete(`/tables/${id}`, token); fetchTables(); } catch { }
+    setTableActionBusy(null);
   };
 
   const activateTable = async (id: string) => {
-    try { await apiPost(`/tables/${id}/activate`, {}, token); fetchTables(); } catch { }
+    setTableActionBusy(id);
+    try {
+      await apiPost(`/tables/${id}/activate`, {}, token);
+      setTables(prev => prev.map(t => t.id === id ? { ...t, status: "active" } : t));
+    } catch { }
+    setTableActionBusy(null);
+    fetchTables();
   };
 
   const deactivateTable = async (id: string) => {
-    try { await apiPost(`/tables/${id}/deactivate`, {}, token); fetchTables(); } catch { }
+    setTableActionBusy(id);
+    try {
+      await apiPost(`/tables/${id}/deactivate`, {}, token);
+      setTables(prev => prev.map(t => t.id === id ? { ...t, status: "inactive" } : t));
+    } catch { }
+    setTableActionBusy(null);
+    fetchTables();
   };
 
   const logout = () => {
@@ -194,12 +217,19 @@ export default function OwnerDashboard() {
                   <div className="text-xs text-slate-500">Capacity: {t.capacity} &middot; ID: {t.id.slice(0, 8)}...</div>
                   <div className="flex gap-2 mt-auto">
                     {t.status === "inactive" && (
-                      <button onClick={() => activateTable(t.id)} className="flex-1 py-2 rounded-lg bg-green-500 text-white font-semibold text-sm">Activate</button>
+                      <button onClick={() => activateTable(t.id)} disabled={tableActionBusy === t.id}
+                        className="flex-1 py-2 rounded-lg bg-green-500 text-white font-semibold text-sm disabled:opacity-50">
+                        {tableActionBusy === t.id ? "..." : "Activate"}
+                      </button>
                     )}
                     {(t.status === "active" || t.status === "dirty") && (
-                      <button onClick={() => deactivateTable(t.id)} className="flex-1 py-2 rounded-lg bg-orange-500 text-white font-semibold text-sm">Deactivate</button>
+                      <button onClick={() => deactivateTable(t.id)} disabled={tableActionBusy === t.id}
+                        className="flex-1 py-2 rounded-lg bg-orange-500 text-white font-semibold text-sm disabled:opacity-50">
+                        {tableActionBusy === t.id ? "..." : "Deactivate"}
+                      </button>
                     )}
-                    <button onClick={() => deleteTable(t.id)} className="py-2 px-3 rounded-lg bg-red-50 text-red-500 font-semibold text-sm hover:bg-red-100">Delete</button>
+                    <button onClick={() => deleteTable(t.id)} disabled={tableActionBusy === t.id}
+                      className="py-2 px-3 rounded-lg bg-red-50 text-red-500 font-semibold text-sm hover:bg-red-100 disabled:opacity-50">Delete</button>
                   </div>
                 </div>
               ))}

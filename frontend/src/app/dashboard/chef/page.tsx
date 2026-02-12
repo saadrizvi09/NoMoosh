@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/api";
 
@@ -36,37 +36,56 @@ export default function ChefDashboard() {
   const [staffName, setStaffName] = useState("");
   const [orders, setOrders] = useState<Order[]>([]);
   const [now, setNow] = useState(Date.now());
+  const [settingEta, setSettingEta] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const fetchingRef = useRef(false);
 
   useEffect(() => {
+    mountedRef.current = true;
     const t = localStorage.getItem("nomoosh_staff_token") || "";
     const r = localStorage.getItem("nomoosh_staff_role") || "";
     const rid = parseInt(localStorage.getItem("nomoosh_staff_restaurant_id") || "0");
     const n = localStorage.getItem("nomoosh_staff_name") || "";
     if (!t || (r !== "chef" && r !== "owner")) { router.push("/staff/login"); return; }
     setToken(t); setRestaurantId(rid); setStaffName(n);
+    return () => { mountedRef.current = false; };
   }, [router]);
 
   const fetchOrders = useCallback(async () => {
-    if (!token || !restaurantId) return;
-    try { setOrders(await apiGet(`/orders/restaurant/${restaurantId}`, token)); } catch { }
+    if (!token || !restaurantId || fetchingRef.current) return;
+    fetchingRef.current = true;
+    try {
+      const data = await apiGet(`/orders/restaurant/${restaurantId}`, token);
+      if (mountedRef.current) setOrders(data);
+    } catch { }
+    fetchingRef.current = false;
   }, [token, restaurantId]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
-  // Poll every 5 seconds for new orders
+  // Poll every 8s
   useEffect(() => {
-    const id = setInterval(fetchOrders, 5000);
+    if (!token || !restaurantId) return;
+    const id = setInterval(fetchOrders, 8000);
     return () => clearInterval(id);
-  }, [fetchOrders]);
+  }, [fetchOrders, token, restaurantId]);
 
-  // Tick timer every second
+  // Tick every second
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
   const setETA = async (orderId: string, minutes: number) => {
-    try { await apiPost(`/orders/${orderId}/eta`, { minutes }, token); fetchOrders(); } catch { }
+    setSettingEta(orderId);
+    try {
+      await apiPost(`/orders/${orderId}/eta`, { minutes }, token);
+      // Optimistic update
+      setOrders(prev => prev.map(o =>
+        o.id === orderId ? { ...o, chef_eta_minutes: minutes, chef_eta_set_at: new Date().toISOString() } : o
+      ));
+    } catch { }
+    setSettingEta(null);
   };
 
   const logout = () => {
@@ -88,7 +107,6 @@ export default function ChefDashboard() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Split orders: pending (no ETA) vs in-progress (ETA set)
   const pendingOrders = orders.filter((o) => !o.chef_eta_minutes);
   const activeOrders = orders.filter((o) => o.chef_eta_minutes && o.chef_eta_set_at);
 
@@ -149,7 +167,8 @@ export default function ChefDashboard() {
                       <button
                         key={min}
                         onClick={() => setETA(order.id, min)}
-                        className="flex-1 py-4 rounded-xl text-white font-bold text-lg shadow-lg active:scale-95 transition"
+                        disabled={settingEta === order.id}
+                        className="flex-1 py-4 rounded-xl text-white font-bold text-lg shadow-lg active:scale-95 transition disabled:opacity-50"
                         style={{ background: BRAND }}
                       >
                         {min}m
@@ -198,7 +217,8 @@ export default function ChefDashboard() {
                     <div className="flex gap-2 mt-3">
                       {[10, 15, 20, 30].map((min) => (
                         <button key={min} onClick={() => setETA(order.id, min)}
-                          className="flex-1 py-2 rounded-lg bg-slate-100 text-slate-600 font-semibold text-sm hover:bg-slate-200 transition active:scale-95">
+                          disabled={settingEta === order.id}
+                          className="flex-1 py-2 rounded-lg bg-slate-100 text-slate-600 font-semibold text-sm hover:bg-slate-200 transition active:scale-95 disabled:opacity-50">
                           {min}m
                         </button>
                       ))}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/api";
 
@@ -20,35 +20,60 @@ export default function WaiterDashboard() {
   const [restaurantId, setRestaurantId] = useState(0);
   const [staffName, setStaffName] = useState("");
   const [tables, setTables] = useState<Table[]>([]);
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const fetchingRef = useRef(false);
 
   useEffect(() => {
+    mountedRef.current = true;
     const t = localStorage.getItem("nomoosh_staff_token") || "";
     const r = localStorage.getItem("nomoosh_staff_role") || "";
     const rid = parseInt(localStorage.getItem("nomoosh_staff_restaurant_id") || "0");
     const n = localStorage.getItem("nomoosh_staff_name") || "";
     if (!t || r !== "waiter") { router.push("/staff/login"); return; }
     setToken(t); setRestaurantId(rid); setStaffName(n);
+    return () => { mountedRef.current = false; };
   }, [router]);
 
   const fetchTables = useCallback(async () => {
-    if (!token || !restaurantId) return;
-    try { setTables(await apiGet(`/tables/restaurant/${restaurantId}`, token)); } catch { }
+    if (!token || !restaurantId || fetchingRef.current) return;
+    fetchingRef.current = true;
+    try {
+      const data = await apiGet(`/tables/restaurant/${restaurantId}`, token);
+      if (mountedRef.current) setTables(data);
+    } catch { }
+    fetchingRef.current = false;
   }, [token, restaurantId]);
 
   useEffect(() => { fetchTables(); }, [fetchTables]);
 
-  // Auto-refresh every 5 seconds
+  // Poll every 8s (was 5s)
   useEffect(() => {
-    const id = setInterval(fetchTables, 5000);
+    if (!token || !restaurantId) return;
+    const id = setInterval(fetchTables, 8000);
     return () => clearInterval(id);
-  }, [fetchTables]);
+  }, [fetchTables, token, restaurantId]);
 
   const activate = async (id: string) => {
-    try { await apiPost(`/tables/${id}/activate`, {}, token); fetchTables(); } catch { }
+    setActionInProgress(id);
+    try {
+      await apiPost(`/tables/${id}/activate`, {}, token);
+      // Optimistic update
+      setTables(prev => prev.map(t => t.id === id ? { ...t, status: "active" } : t));
+    } catch { }
+    setActionInProgress(null);
+    fetchTables();
   };
 
   const deactivate = async (id: string) => {
-    try { await apiPost(`/tables/${id}/deactivate`, {}, token); fetchTables(); } catch { }
+    setActionInProgress(id);
+    try {
+      await apiPost(`/tables/${id}/deactivate`, {}, token);
+      // Optimistic update
+      setTables(prev => prev.map(t => t.id === id ? { ...t, status: "inactive" } : t));
+    } catch { }
+    setActionInProgress(null);
+    fetchTables();
   };
 
   const logout = () => {
@@ -119,20 +144,23 @@ export default function WaiterDashboard() {
                 <div className="flex gap-2 mt-auto">
                   {t.status === "inactive" && (
                     <button onClick={() => activate(t.id)}
-                      className="flex-1 py-3 rounded-xl bg-green-500 text-white font-bold text-base shadow active:scale-95 transition">
-                      Activate Table
+                      disabled={actionInProgress === t.id}
+                      className="flex-1 py-3 rounded-xl bg-green-500 text-white font-bold text-base shadow active:scale-95 transition disabled:opacity-50">
+                      {actionInProgress === t.id ? "Activating..." : "Activate Table"}
                     </button>
                   )}
                   {t.status === "active" && (
                     <button onClick={() => deactivate(t.id)}
-                      className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-bold text-base shadow active:scale-95 transition">
-                      Deactivate
+                      disabled={actionInProgress === t.id}
+                      className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-bold text-base shadow active:scale-95 transition disabled:opacity-50">
+                      {actionInProgress === t.id ? "Deactivating..." : "Deactivate"}
                     </button>
                   )}
                   {t.status === "dirty" && (
                     <button onClick={() => deactivate(t.id)}
-                      className="flex-1 py-3 rounded-xl bg-blue-500 text-white font-bold text-base shadow active:scale-95 transition">
-                      Mark Cleared &amp; Reset
+                      disabled={actionInProgress === t.id}
+                      className="flex-1 py-3 rounded-xl bg-blue-500 text-white font-bold text-base shadow active:scale-95 transition disabled:opacity-50">
+                      {actionInProgress === t.id ? "Resetting..." : "Mark Cleared & Reset"}
                     </button>
                   )}
                 </div>
