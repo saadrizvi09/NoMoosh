@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, getWsBase } from "@/lib/api";
 
 const BRAND = "#1c37b3";
 
@@ -22,7 +22,6 @@ export default function WaiterDashboard() {
   const [tables, setTables] = useState<Table[]>([]);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const mountedRef = useRef(true);
-  const fetchingRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -35,45 +34,87 @@ export default function WaiterDashboard() {
     return () => { mountedRef.current = false; };
   }, [router]);
 
-  const fetchTables = useCallback(async () => {
-    if (!token || !restaurantId || fetchingRef.current) return;
-    fetchingRef.current = true;
-    try {
-      const data = await apiGet(`/tables/restaurant/${restaurantId}`, token);
-      if (mountedRef.current) setTables(data);
-    } catch { }
-    fetchingRef.current = false;
-  }, [token, restaurantId]);
-
-  useEffect(() => { fetchTables(); }, [fetchTables]);
-
-  // Poll every 8s (was 5s)
+  /* ── WebSocket — instant table updates ─────────────── */
   useEffect(() => {
     if (!token || !restaurantId) return;
-    const id = setInterval(fetchTables, 8000);
-    return () => clearInterval(id);
-  }, [fetchTables, token, restaurantId]);
+    let alive = true;
+    let ws: WebSocket | null = null;
+    let pingInterval: NodeJS.Timeout | null = null;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    let reconnectDelay = 2000;
+
+    const connect = () => {
+      if (!alive) return;
+      ws = new WebSocket(`${getWsBase()}/ws/staff/${restaurantId}?token=${token}`);
+
+      ws.onopen = () => {
+        reconnectDelay = 2000;
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: "ping" }));
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "pong") return;
+
+          if (msg.type === "init") {
+            setTables(msg.tables || []);
+          } else if (msg.type === "table_status") {
+            setTables(prev => prev.map(t =>
+              t.id === msg.table_id ? { ...t, status: msg.status } : t
+            ));
+          } else if (msg.type === "table_created") {
+            setTables(prev => {
+              if (prev.some(t => t.id === msg.table.id)) return prev;
+              return [...prev, msg.table];
+            });
+          } else if (msg.type === "table_deleted") {
+            setTables(prev => prev.filter(t => t.id !== msg.table_id));
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        if (pingInterval) clearInterval(pingInterval);
+        if (alive) {
+          reconnectTimer = setTimeout(connect, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+        }
+      };
+      ws.onerror = () => ws?.close();
+    };
+
+    connect();
+
+    return () => {
+      alive = false;
+      if (pingInterval) clearInterval(pingInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [token, restaurantId]);
 
   const activate = async (id: string) => {
     setActionInProgress(id);
     try {
       await apiPost(`/tables/${id}/activate`, {}, token);
-      // Optimistic update
+      // Optimistic update (WS will confirm)
       setTables(prev => prev.map(t => t.id === id ? { ...t, status: "active" } : t));
     } catch { }
     setActionInProgress(null);
-    fetchTables();
   };
 
   const deactivate = async (id: string) => {
     setActionInProgress(id);
     try {
       await apiPost(`/tables/${id}/deactivate`, {}, token);
-      // Optimistic update
+      // Optimistic update (WS will confirm)
       setTables(prev => prev.map(t => t.id === id ? { ...t, status: "inactive" } : t));
     } catch { }
     setActionInProgress(null);
-    fetchTables();
   };
 
   const logout = () => {

@@ -354,20 +354,24 @@ async def confirm_payment(data: PaymentConfirmRequest):
     if not cart_items.data:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
-    # Batch-fetch all menu prices at once
+    # Batch-fetch all menu data at once
     menu_ids = list({ci["menu_item_id"] for ci in cart_items.data})
-    menu_rows = sb.table("menu").select("id, price").in_("id", menu_ids).execute()
-    price_map = {m["id"]: m["price"] for m in (menu_rows.data or [])}
+    menu_rows = sb.table("menu").select("id, price, dish_name, category, variant_name").in_("id", menu_ids).execute()
+    menu_map = {m["id"]: m for m in (menu_rows.data or [])}
 
     total = 0
     order_items_data = []
     for ci in cart_items.data:
-        price = price_map.get(ci["menu_item_id"], 0)
+        m = menu_map.get(ci["menu_item_id"], {})
+        price = m.get("price", 0)
         total += price * ci["quantity"]
         order_items_data.append({
             "menu_item_id": ci["menu_item_id"],
             "quantity": ci["quantity"],
             "price_at_time": price,
+            "dish_name": m.get("dish_name", "Unknown"),
+            "category": m.get("category"),
+            "variant_name": m.get("variant_name", "Regular"),
         })
 
     # Table number
@@ -376,7 +380,7 @@ async def confirm_payment(data: PaymentConfirmRequest):
 
     # Create order
     order_id = str(uuid.uuid4())
-    sb.table("orders").insert({
+    order_result = sb.table("orders").insert({
         "id": order_id,
         "session_id": data.session_id,
         "total_amount": total,
@@ -386,7 +390,12 @@ async def confirm_payment(data: PaymentConfirmRequest):
     }).execute()
 
     for oi in order_items_data:
-        sb.table("order_items").insert({"order_id": order_id, **oi}).execute()
+        sb.table("order_items").insert({
+            "order_id": order_id,
+            "menu_item_id": oi["menu_item_id"],
+            "quantity": oi["quantity"],
+            "price_at_time": oi["price_at_time"],
+        }).execute()
 
     # Payment record
     sb.table("payments").insert({
@@ -411,11 +420,45 @@ async def confirm_payment(data: PaymentConfirmRequest):
         _payment_timers[data.session_id].cancel()
         del _payment_timers[data.session_id]
 
-    # Broadcast
+    # Broadcast to customer session
     await ws_manager.broadcast(data.session_id, {
         "type": "order_confirmed",
         "order_id": order_id,
         "total": total,
+    })
+
+    # Broadcast enriched order to staff dashboards
+    order_created_at = order_result.data[0]["created_at"] if order_result.data else None
+    enriched_items = [{
+        "menu_item_id": oi["menu_item_id"],
+        "quantity": oi["quantity"],
+        "price_at_time": oi["price_at_time"],
+        "dish_name": oi["dish_name"],
+        "category": oi["category"],
+        "variant_name": oi["variant_name"],
+    } for oi in order_items_data]
+    await ws_manager.broadcast(f"staff:{s['restaurant_id']}", {
+        "type": "new_order",
+        "order": {
+            "id": order_id,
+            "session_id": data.session_id,
+            "total_amount": total,
+            "status": "paid",
+            "table_number": table_number,
+            "restaurant_id": s["restaurant_id"],
+            "created_at": order_created_at,
+            "items": enriched_items,
+            "chef_eta_minutes": None,
+            "chef_eta_set_at": None,
+            "session_status": "completed",
+        },
+    })
+
+    # Broadcast table status change to staff
+    await ws_manager.broadcast(f"staff:{s['restaurant_id']}", {
+        "type": "table_status",
+        "table_id": s["table_id"],
+        "status": "dirty",
     })
 
     return {"message": "Payment confirmed", "order_id": order_id, "total": total}
@@ -508,6 +551,15 @@ async def set_chef_eta(order_id: str, data: ChefETARequest, authorization: str =
     # Broadcast ETA to customers at the table
     await ws_manager.broadcast(session_id, {
         "type": "chef_eta",
+        "minutes": data.minutes,
+        "set_at": now,
+    })
+
+    # Broadcast to staff dashboards
+    await ws_manager.broadcast(f"staff:{payload['restaurant_id']}", {
+        "type": "order_eta",
+        "order_id": order_id,
+        "session_id": session_id,
         "minutes": data.minutes,
         "set_at": now,
     })

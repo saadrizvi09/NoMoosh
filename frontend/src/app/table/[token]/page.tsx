@@ -148,74 +148,145 @@ export default function TablePage() {
 
   useEffect(() => { checkTable(); }, [checkTable]);
 
-  /* ── 2. Polling for waiting state ────────────────────── */
+  /* ── 2. Waiting WS — instant notification when table is activated ── */
   useEffect(() => {
     if (phase !== "waiting") return;
-    const id = setInterval(checkTable, 3000);
-    return () => clearInterval(id);
-  }, [phase, checkTable]);
+    let alive = true;
+    let ws: WebSocket | null = null;
+    let pingInterval: NodeJS.Timeout | null = null;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    let reconnectDelay = 2000;
 
-  /* ── 3. WebSocket connection with auto-reconnect ──────── */
+    const connect = () => {
+      if (!alive) return;
+      ws = new WebSocket(`${getWsBase()}/ws/table/${qrToken}`);
+
+      ws.onopen = () => {
+        reconnectDelay = 2000;
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: "ping" }));
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "table_activated") checkTable();
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        if (pingInterval) clearInterval(pingInterval);
+        if (alive) {
+          reconnectTimer = setTimeout(connect, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+        }
+      };
+
+      ws.onerror = () => ws?.close();
+    };
+
+    connect();
+
+    return () => {
+      alive = false;
+      if (pingInterval) clearInterval(pingInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [phase, qrToken, checkTable]);
+
+  /* ── 3. Session WS — all real-time state via push ────────── */
+  const reconnectDelayRef = useRef(1000);
+
   useEffect(() => {
-    if (!sessionId || phase === "loading" || phase === "waiting") return;
+    if (!sessionId) return;
 
     let alive = true;
     let pingInterval: NodeJS.Timeout | null = null;
 
     const connect = () => {
       if (!alive || !mountedRef.current) return;
-      const wsUrl = `${getWsBase()}/ws/${sessionId}`;
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(`${getWsBase()}/ws/${sessionId}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
         wsConnectedRef.current = true;
-        // Send ping every 25s to keep connection alive
+        reconnectDelayRef.current = 1000;
         pingInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
+          if (ws.readyState === WebSocket.OPEN)
             ws.send(JSON.stringify({ type: "ping" }));
-          }
-        }, 25000);
+        }, 30000);
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === "pong") return; // keepalive response
-          if (msg.type === "cart_update" && msg.cart) {
+          if (msg.type === "pong") return;
+
+          if (msg.type === "init") {
+            // Full state sync (on connect / reconnect)
+            const c = msg.cart || {};
+            setCart(c.items || []);
+            setCartTotal(c.total || 0);
+            setCartVersion(c.version || 0);
+
+            const s = msg.session || {};
+            if (s.session_status === "completed") {
+              if (s.order) { setOrderId(s.order.id); setOrderTotal(s.order.total_amount); }
+              if (s.chef_eta_minutes && s.chef_eta_set_at) {
+                setChefEtaMinutes(s.chef_eta_minutes);
+                setChefEtaSetAt(s.chef_eta_set_at);
+                setPhase("countdown");
+              } else {
+                setPhase("confirmed");
+              }
+            } else if (s.payment_lock) {
+              setPaymentLocked(true);
+              setPhase("payment");
+            }
+            // else: stay in current phase ("menu")
+          }
+          else if (msg.type === "cart_update" && msg.cart) {
             setCart(msg.cart.items || []);
             setCartTotal(msg.cart.total || 0);
             setCartVersion(msg.cart.version || 0);
-          } else if (msg.type === "payment_locked") {
+          }
+          else if (msg.type === "payment_locked") {
             setPaymentLocked(true);
             setPhase("payment");
-          } else if (msg.type === "payment_unlocked") {
+          }
+          else if (msg.type === "payment_unlocked") {
             setPaymentLocked(false);
             setPhase("menu");
-          } else if (msg.type === "order_confirmed") {
+          }
+          else if (msg.type === "order_confirmed") {
             setOrderId(msg.order_id);
             setOrderTotal(msg.total);
             setPhase("confirmed");
-          } else if (msg.type === "chef_eta") {
+          }
+          else if (msg.type === "chef_eta") {
             setChefEtaMinutes(msg.minutes);
             setChefEtaSetAt(msg.set_at);
             setPhase("countdown");
           }
-        } catch { }
+        } catch (e) {
+          console.warn("WS parse error:", e);
+        }
       };
 
       ws.onclose = () => {
         wsConnectedRef.current = false;
         if (pingInterval) clearInterval(pingInterval);
-        // Auto-reconnect after 2s
         if (alive && mountedRef.current) {
-          reconnectTimerRef.current = setTimeout(connect, 2000);
+          const delay = reconnectDelayRef.current;
+          reconnectDelayRef.current = Math.min(delay * 2, 30000);
+          reconnectTimerRef.current = setTimeout(connect, delay);
         }
       };
 
-      ws.onerror = () => {
-        ws.close(); // triggers onclose → reconnect
-      };
+      ws.onerror = () => ws.close();
     };
 
     connect();
@@ -227,66 +298,9 @@ export default function TablePage() {
       wsRef.current?.close();
       wsConnectedRef.current = false;
     };
-  }, [sessionId, phase]);
+  }, [sessionId]);
 
-  /* ── 4. Poll cart as fallback ONLY when WS is down ───── */
-  useEffect(() => {
-    if (!sessionId || phase !== "menu") return;
-    // Initial cart fetch
-    const fetchCart = async () => {
-      try {
-        const data = await apiGet(`/cart/${sessionId}`);
-        if (mountedRef.current) {
-          setCart(data.items || []);
-          setCartTotal(data.total || 0);
-          setCartVersion(data.version || 0);
-        }
-      } catch { }
-    };
-    fetchCart();
-    // Only poll if WebSocket is not connected — poll every 5s (was 2s)
-    const id = setInterval(() => {
-      if (!wsConnectedRef.current) fetchCart();
-    }, 5000);
-    return () => clearInterval(id);
-  }, [sessionId, phase]);
-
-  /* ── 5. Poll session status for payment/ETA (slow poll) */
-  useEffect(() => {
-    if (!sessionId || (phase !== "payment" && phase !== "confirmed")) return;
-    const poll = async () => {
-      try {
-        const status = await apiGet(`/sessions/${sessionId}/status`);
-        if (!mountedRef.current) return;
-        if (status.payment_lock && phase !== "payment") {
-          setPaymentLocked(true);
-          setPhase("payment");
-        }
-        if (!status.payment_lock && phase === "payment") {
-          setPaymentLocked(false);
-          setPhase("menu");
-        }
-        if (status.session_status === "completed" && phase === "payment") {
-          setPhase("confirmed");
-        }
-        if (status.chef_eta_minutes && status.chef_eta_set_at) {
-          setChefEtaMinutes(status.chef_eta_minutes);
-          setChefEtaSetAt(status.chef_eta_set_at);
-          if (phase === "confirmed") setPhase("countdown");
-        }
-        if (status.order) {
-          setOrderId(status.order.id);
-          setOrderTotal(status.order.total_amount);
-        }
-      } catch { }
-    };
-    poll();
-    // Poll every 5s instead of 3s (WS handles real-time)
-    const id = setInterval(poll, 5000);
-    return () => clearInterval(id);
-  }, [sessionId, phase]);
-
-  /* ── 6. Countdown timer tick ─────────────────────────── */
+  /* ── 4. Countdown timer tick ─────────────────────────── */
   useEffect(() => {
     if (phase !== "countdown" && phase !== "payment") return;
     const id = setInterval(() => setNow(Date.now()), 1000);

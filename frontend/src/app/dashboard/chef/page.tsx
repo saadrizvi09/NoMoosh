@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, getWsBase } from "@/lib/api";
 
 const BRAND = "#1c37b3";
 
@@ -38,7 +38,6 @@ export default function ChefDashboard() {
   const [now, setNow] = useState(Date.now());
   const [settingEta, setSettingEta] = useState<string | null>(null);
   const mountedRef = useRef(true);
-  const fetchingRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -51,24 +50,68 @@ export default function ChefDashboard() {
     return () => { mountedRef.current = false; };
   }, [router]);
 
-  const fetchOrders = useCallback(async () => {
-    if (!token || !restaurantId || fetchingRef.current) return;
-    fetchingRef.current = true;
-    try {
-      const data = await apiGet(`/orders/restaurant/${restaurantId}`, token);
-      if (mountedRef.current) setOrders(data);
-    } catch { }
-    fetchingRef.current = false;
-  }, [token, restaurantId]);
-
-  useEffect(() => { fetchOrders(); }, [fetchOrders]);
-
-  // Poll every 8s
+  /* ── WebSocket — instant order updates ─────────────── */
   useEffect(() => {
     if (!token || !restaurantId) return;
-    const id = setInterval(fetchOrders, 8000);
-    return () => clearInterval(id);
-  }, [fetchOrders, token, restaurantId]);
+    let alive = true;
+    let ws: WebSocket | null = null;
+    let pingInterval: NodeJS.Timeout | null = null;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    let reconnectDelay = 2000;
+
+    const connect = () => {
+      if (!alive) return;
+      ws = new WebSocket(`${getWsBase()}/ws/staff/${restaurantId}?token=${token}`);
+
+      ws.onopen = () => {
+        reconnectDelay = 2000;
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: "ping" }));
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "pong") return;
+
+          if (msg.type === "init") {
+            setOrders(msg.orders || []);
+          } else if (msg.type === "new_order") {
+            setOrders(prev => {
+              if (prev.some(o => o.id === msg.order.id)) return prev;
+              return [msg.order, ...prev];
+            });
+          } else if (msg.type === "order_eta") {
+            setOrders(prev => prev.map(o =>
+              o.id === msg.order_id
+                ? { ...o, chef_eta_minutes: msg.minutes, chef_eta_set_at: msg.set_at }
+                : o
+            ));
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        if (pingInterval) clearInterval(pingInterval);
+        if (alive) {
+          reconnectTimer = setTimeout(connect, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+        }
+      };
+      ws.onerror = () => ws?.close();
+    };
+
+    connect();
+
+    return () => {
+      alive = false;
+      if (pingInterval) clearInterval(pingInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [token, restaurantId]);
 
   // Tick every second
   useEffect(() => {

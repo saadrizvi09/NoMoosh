@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { apiGet, apiPost, apiPut, apiDelete, getWsBase } from "@/lib/api";
 
 const BRAND = "#1c37b3";
 const API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
@@ -46,8 +46,6 @@ export default function OwnerDashboard() {
   const [newTableNumber, setNewTableNumber] = useState("");
   const [newTableCapacity, setNewTableCapacity] = useState(4);
   const [tableActionBusy, setTableActionBusy] = useState<string | null>(null);
-  const fetchingMenuRef = useRef(false);
-  const fetchingTablesRef = useRef(false);
 
   useEffect(() => {
     const t = localStorage.getItem("nomoosh_staff_token") || "";
@@ -60,21 +58,76 @@ export default function OwnerDashboard() {
     setStaffName(n);
   }, [router]);
 
+  /* ── Fetch menu via HTTP (owner is the only editor) ────── */
   const fetchMenu = useCallback(async () => {
-    if (!token || !restaurantId || fetchingMenuRef.current) return;
-    fetchingMenuRef.current = true;
+    if (!token || !restaurantId) return;
     try { setMenuItems(await apiGet(`/menu/restaurant/${restaurantId}`, token)); } catch { }
-    fetchingMenuRef.current = false;
   }, [token, restaurantId]);
 
-  const fetchTables = useCallback(async () => {
-    if (!token || !restaurantId || fetchingTablesRef.current) return;
-    fetchingTablesRef.current = true;
-    try { setTables(await apiGet(`/tables/restaurant/${restaurantId}`, token)); } catch { }
-    fetchingTablesRef.current = false;
-  }, [token, restaurantId]);
+  useEffect(() => { fetchMenu(); }, [fetchMenu]);
 
-  useEffect(() => { fetchMenu(); fetchTables(); }, [fetchMenu, fetchTables]);
+  /* ── WebSocket — instant table updates ─────────────────── */
+  useEffect(() => {
+    if (!token || !restaurantId) return;
+    let alive = true;
+    let ws: WebSocket | null = null;
+    let pingInterval: NodeJS.Timeout | null = null;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    let reconnectDelay = 2000;
+
+    const connect = () => {
+      if (!alive) return;
+      ws = new WebSocket(`${getWsBase()}/ws/staff/${restaurantId}?token=${token}`);
+
+      ws.onopen = () => {
+        reconnectDelay = 2000;
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: "ping" }));
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "pong") return;
+
+          if (msg.type === "init") {
+            setTables(msg.tables || []);
+          } else if (msg.type === "table_status") {
+            setTables(prev => prev.map(t =>
+              t.id === msg.table_id ? { ...t, status: msg.status } : t
+            ));
+          } else if (msg.type === "table_created") {
+            setTables(prev => {
+              if (prev.some(t => t.id === msg.table.id)) return prev;
+              return [...prev, msg.table];
+            });
+          } else if (msg.type === "table_deleted") {
+            setTables(prev => prev.filter(t => t.id !== msg.table_id));
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        if (pingInterval) clearInterval(pingInterval);
+        if (alive) {
+          reconnectTimer = setTimeout(connect, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+        }
+      };
+      ws.onerror = () => ws?.close();
+    };
+
+    connect();
+
+    return () => {
+      alive = false;
+      if (pingInterval) clearInterval(pingInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [token, restaurantId]);
 
   const addDish = async () => {
     try {
@@ -113,15 +166,16 @@ export default function OwnerDashboard() {
       await apiPost("/tables", { restaurant_id: restaurantId, number: newTableNumber, capacity: newTableCapacity }, token);
       setNewTableNumber("");
       setNewTableCapacity(4);
-      fetchTables();
+      // WS will push table_created
     } catch { }
     setTableActionBusy(null);
   };
 
   const deleteTable = async (id: string) => {
     setTableActionBusy(id);
-    try { await apiDelete(`/tables/${id}`, token); fetchTables(); } catch { }
+    try { await apiDelete(`/tables/${id}`, token); } catch { }
     setTableActionBusy(null);
+    // WS will push table_deleted
   };
 
   const activateTable = async (id: string) => {
@@ -131,7 +185,6 @@ export default function OwnerDashboard() {
       setTables(prev => prev.map(t => t.id === id ? { ...t, status: "active" } : t));
     } catch { }
     setTableActionBusy(null);
-    fetchTables();
   };
 
   const deactivateTable = async (id: string) => {
@@ -141,7 +194,6 @@ export default function OwnerDashboard() {
       setTables(prev => prev.map(t => t.id === id ? { ...t, status: "inactive" } : t));
     } catch { }
     setTableActionBusy(null);
-    fetchTables();
   };
 
   const logout = () => {

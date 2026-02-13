@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from supabase_client import get_supabase
 from routers.staff import get_staff_from_token
+from ws_manager import manager as ws_manager
 
 router = APIRouter(prefix="/tables", tags=["tables"])
 
@@ -49,6 +50,12 @@ async def create_table(data: CreateTableRequest, authorization: str = Header(Non
 
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create table")
+
+    # Broadcast to staff dashboards
+    await ws_manager.broadcast(f"staff:{data.restaurant_id}", {
+        "type": "table_created", "table": result.data[0],
+    })
+
     return result.data[0]
 
 
@@ -115,6 +122,12 @@ async def delete_table(table_id: str, authorization: str = Header(None)):
     
     # Finally delete the table
     sb.table("restaurant_tables").delete().eq("id", table_id).execute()
+
+    # Broadcast to staff dashboards
+    await ws_manager.broadcast(f"staff:{payload['restaurant_id']}", {
+        "type": "table_deleted", "table_id": table_id,
+    })
+
     return {"message": "Table deleted"}
 
 
@@ -148,6 +161,18 @@ async def activate_table(table_id: str, authorization: str = Header(None)):
     # Create a cart for the session
     sb.table("carts").insert({"session_id": session_id}).execute()
 
+    t = table.data[0]
+
+    # Notify waiting customers via table WS channel
+    await ws_manager.broadcast(f"table:{t['qr_token']}", {
+        "type": "table_activated", "session_id": session_id,
+    })
+
+    # Notify staff dashboards
+    await ws_manager.broadcast(f"staff:{payload['restaurant_id']}", {
+        "type": "table_status", "table_id": table_id, "status": "active",
+    })
+
     return {"message": "Table activated", "session_id": session_id}
 
 
@@ -169,6 +194,11 @@ async def deactivate_table(table_id: str, authorization: str = Header(None)):
 
     # Expire any active sessions for this table
     sb.table("sessions").update({"status": "expired"}).eq("table_id", table_id).eq("status", "active").execute()
+
+    # Notify staff dashboards
+    await ws_manager.broadcast(f"staff:{payload['restaurant_id']}", {
+        "type": "table_status", "table_id": table_id, "status": "inactive",
+    })
 
     return {"message": "Table deactivated"}
 
