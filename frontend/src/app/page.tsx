@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -6,12 +6,12 @@ import { supabase } from "@/lib/supabase";
 
 /**
  * Nomoosh Landing Page (Premium UI)
- * - Brand color: #1c37b3
+ * - Brand color: #f97316
  * - Matches provided mock design
  * - Join as Restaurant => /res_details
  */
 
-const BRAND = "#1c37b3";
+const BRAND = "#f97316";
 
 export default function LandingPage() {
   const router = useRouter();
@@ -79,7 +79,7 @@ export default function LandingPage() {
             >
               N
             </div>
-            <div className="text-2xl font-extrabold tracking-tight text-[#1c37b3]">
+            <div className="text-2xl font-extrabold tracking-tight text-[#f97316]">
               Nomoosh
             </div>
           </div>
@@ -209,8 +209,8 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6 py-16 grid lg:grid-cols-2 gap-12 items-center">
           {/* left */}
           <div>
-            <div className="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-full px-4 py-2 text-sm text-[#1c37b3] shadow-sm">
-              <span className="h-2 w-2 rounded-full bg-[#1c37b3]" />
+            <div className="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-full px-4 py-2 text-sm text-[#f97316] shadow-sm">
+              <span className="h-2 w-2 rounded-full bg-[#f97316]" />
               Now live in 50+ cities
             </div>
 
@@ -218,14 +218,14 @@ export default function LandingPage() {
               <span className="font-serif font-semibold text-slate-900">
                 Menus that live{" "}
               </span>
-              <span className="font-serif font-semibold text-[#1c37b3]">
+              <span className="font-serif font-semibold text-[#f97316]">
                 on your table.
               </span>
             </h1>
 
             <p className="mt-6 text-lg text-slate-600 max-w-xl">
               Let customers scan a QR code, browse your menu, and order directly
-              from their phone — no apps, no waiting, no confusion.
+              from their phone â€” no apps, no waiting, no confusion.
             </p>
 
             <div className="mt-10 flex flex-wrap items-center gap-4">
@@ -235,7 +235,7 @@ export default function LandingPage() {
                 style={{ background: BRAND }}
               >
                 Join as Restaurant{" "}
-                <span className="text-xl translate-y-[1px]">→</span>
+                <span className="text-xl translate-y-[1px]">â†’</span>
               </button>
 
               <button
@@ -254,7 +254,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* right — hidden on small screens */}
+          {/* right â€” hidden on small screens */}
           <div className="relative hidden lg:flex justify-center lg:justify-end">
             {/* phone mock */}
             <div className="relative w-[360px] h-[540px] rounded-[40px] bg-gradient-to-b from-slate-50 to-white shadow-2xl border border-slate-200 overflow-hidden">
@@ -263,20 +263,20 @@ export default function LandingPage() {
               {/* content */}
               <div className="pt-16 px-8">
                 <div className="w-16 h-16 rounded-2xl bg-[#e9ecff] flex items-center justify-center mx-auto">
-                  <span className="text-2xl">🍽️</span>
+                  <span className="text-2xl">ðŸ½ï¸</span>
                 </div>
 
                 <h3 className="mt-7 text-center font-serif text-2xl font-bold">
                   The Grand Kitchen
                 </h3>
                 <p className="text-center text-sm text-slate-500 mt-1">
-                  Table 12 · Fine Dining
+                  Table 12 Â· Fine Dining
                 </p>
 
                 <div className="mt-8 space-y-4">
-                  <MenuRow title="Truffle Risotto" badge="Chef's Special" price="₹850" />
-                  <MenuRow title="Grilled Salmon" badge="Popular" price="₹1200" />
-                  <MenuRow title="Tiramisu" badge="" price="₹450" />
+                  <MenuRow title="Truffle Risotto" badge="Chef's Special" price="â‚¹850" />
+                  <MenuRow title="Grilled Salmon" badge="Popular" price="â‚¹1200" />
+                  <MenuRow title="Tiramisu" badge="" price="â‚¹450" />
                 </div>
 
                 <button
@@ -288,7 +288,7 @@ export default function LandingPage() {
 
                 <div className="mt-6 flex justify-end">
                   <div className="bg-white border border-slate-200 shadow-sm px-4 py-2 rounded-2xl flex items-center gap-2">
-                    📱 <span className="text-sm font-medium text-slate-700">Scan & Order</span>
+                    ðŸ“± <span className="text-sm font-medium text-slate-700">Scan & Order</span>
                   </div>
                 </div>
               </div>
@@ -296,7 +296,7 @@ export default function LandingPage() {
 
             {/* floating QR */}
             <div className="absolute left-0 lg:left-14 top-36 bg-white rounded-2xl border border-slate-200 shadow-lg p-4">
-              <div className="text-[#1c37b3] text-3xl">▦</div>
+              <div className="text-[#f97316] text-3xl">â–¦</div>
             </div>
           </div>
         </div>
@@ -317,19 +317,19 @@ export default function LandingPage() {
               step="01"
               title="Place QR on table"
               desc="A unique QR code for every table in your restaurant. Easy to set up, instant to deploy."
-              icon="▦"
+              icon="â–¦"
             />
             <StepCard
               step="02"
               title="Customers scan & order"
               desc="They view your beautiful menu and place orders instantly from their phone. No app needed."
-              icon="📱"
+              icon="ðŸ“±"
             />
             <StepCard
               step="03"
               title="Kitchen receives orders"
               desc="Orders go straight to your kitchen system in real time. Seamless integration."
-              icon="🍽️"
+              icon="ðŸ½ï¸"
             />
           </div>
         </div>
@@ -342,7 +342,7 @@ export default function LandingPage() {
           <div>
             <h2 className="font-serif text-3xl sm:text-4xl lg:text-6xl leading-[1.05] font-semibold">
               Why restaurants choose{" "}
-              <span className="text-[#1c37b3]">Nomoosh</span>
+              <span className="text-[#f97316]">Nomoosh</span>
             </h2>
             <p className="mt-6 text-lg text-slate-600 max-w-xl">
               Join hundreds of restaurants that have modernized their ordering
@@ -362,32 +362,32 @@ export default function LandingPage() {
             <FeatureCard
               title="No app download required"
               desc="Customers simply scan and go. Works on any smartphone browser."
-              icon="⬇️"
+              icon="â¬‡ï¸"
             />
             <FeatureCard
               title="Update menu anytime"
               desc="Change prices, add specials, remove items instantly. No reprinting."
-              icon="🔁"
+              icon="ðŸ”"
             />
             <FeatureCard
               title="Faster table turnover"
               desc="Reduce wait times and serve more customers during peak hours."
-              icon="⏱️"
+              icon="â±ï¸"
             />
             <FeatureCard
               title="Works on any smartphone"
               desc="iOS, Android, any browser. No compatibility issues ever."
-              icon="📱"
+              icon="ðŸ“±"
             />
             <FeatureCard
               title="Reduces staff workload"
               desc="Let your team focus on hospitality, not taking orders."
-              icon="👥"
+              icon="ðŸ‘¥"
             />
             <FeatureCard
               title="Clean, modern experience"
               desc="Impress guests with a beautiful, branded digital menu."
-              icon="✨"
+              icon="âœ¨"
             />
           </div>
         </div>
@@ -405,7 +405,7 @@ export default function LandingPage() {
 
           <div className="mt-16 grid md:grid-cols-3 gap-8">
             <TestimonialCard
-              quote="Nomoosh transformed our restaurant. Orders are faster, accurate, and our staff can focus on what matters — great hospitality."
+              quote="Nomoosh transformed our restaurant. Orders are faster, accurate, and our staff can focus on what matters â€” great hospitality."
               name="Priya Sharma"
               role="Owner, Spice Garden"
             />
@@ -415,7 +415,7 @@ export default function LandingPage() {
               role="Manager, Urban Bites"
             />
             <TestimonialCard
-              quote="I update my menu daily with fresh specials. With Nomoosh, changes reflect instantly — no printing costs."
+              quote="I update my menu daily with fresh specials. With Nomoosh, changes reflect instantly â€” no printing costs."
               name="Neha Kapoor"
               role="Chef & Owner, Flavours"
             />
@@ -436,7 +436,7 @@ export default function LandingPage() {
           {/* search */}
           <div className="mt-14 flex flex-col md:flex-row gap-4 items-center justify-center">
             <div className="w-full md:w-[520px] bg-white border border-slate-200 rounded-2xl px-4 py-4 flex items-center gap-3 shadow-sm">
-              <span className="text-slate-400 text-xl">🔍</span>
+              <span className="text-slate-400 text-xl">ðŸ”</span>
               <input
                 placeholder="Search by restaurant name or cuisine..."
                 className="w-full outline-none text-slate-700"
@@ -447,7 +447,7 @@ export default function LandingPage() {
               className="px-8 py-4 rounded-2xl font-semibold text-white shadow-lg hover:opacity-95 transition w-full md:w-auto"
               style={{ background: BRAND }}
             >
-              📍 Near Me
+              ðŸ“ Near Me
             </button>
           </div>
 
@@ -456,7 +456,7 @@ export default function LandingPage() {
             <RestaurantCard
               title="The Grand Kitchen"
               rating="4.8"
-              meta="Fine Dining · Continental"
+              meta="Fine Dining Â· Continental"
               distance="0.5 km"
               time="12:00 PM - 11:00 PM"
               active={false}
@@ -464,7 +464,7 @@ export default function LandingPage() {
             <RestaurantCard
               title="Spice Symphony"
               rating="4.6"
-              meta="Indian · North Indian"
+              meta="Indian Â· North Indian"
               distance="1.2 km"
               time="11:00 AM - 10:30 PM"
               active={true}
@@ -472,7 +472,7 @@ export default function LandingPage() {
             <RestaurantCard
               title="Sakura Japanese"
               rating="4.9"
-              meta="Japanese · Sushi"
+              meta="Japanese Â· Sushi"
               distance="2.0 km"
               time="12:30 PM - 10:00 PM"
               active={false}
@@ -480,7 +480,7 @@ export default function LandingPage() {
             <RestaurantCard
               title="La Bella Italia"
               rating="4.7"
-              meta="Italian · Pizza & Pasta"
+              meta="Italian Â· Pizza & Pasta"
               distance="1.8 km"
               time="11:30 AM - 11:30 PM"
               active={false}
@@ -489,7 +489,7 @@ export default function LandingPage() {
 
           <div className="mt-12 flex justify-center">
             <button className="px-7 py-3 rounded-2xl bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition font-semibold">
-              🍽️ View All Restaurants
+              ðŸ½ï¸ View All Restaurants
             </button>
           </div>
         </div>
@@ -502,7 +502,7 @@ export default function LandingPage() {
           style={{ background: BRAND }}
         >
           <div className="inline-flex px-5 py-2 rounded-full bg-white/10 text-white border border-white/15 shadow-sm">
-            ✨ Limited time: First 3 months free
+            âœ¨ Limited time: First 3 months free
           </div>
 
           <h2 className="mt-8 font-serif text-3xl sm:text-4xl lg:text-6xl font-semibold">
@@ -517,9 +517,9 @@ export default function LandingPage() {
           <div className="mt-12 flex flex-wrap items-center justify-center gap-4">
             <button
               onClick={goJoinRestaurant}
-              className="px-8 py-4 rounded-full bg-white text-[#1c37b3] font-semibold shadow-lg hover:opacity-95 transition flex items-center gap-3"
+              className="px-8 py-4 rounded-full bg-white text-[#f97316] font-semibold shadow-lg hover:opacity-95 transition flex items-center gap-3"
             >
-              Join as Restaurant <span className="text-xl">→</span>
+              Join as Restaurant <span className="text-xl">â†’</span>
             </button>
 
             <button className="px-8 py-4 rounded-full border border-white/30 bg-white/10 text-white font-semibold hover:bg-white/15 transition">
@@ -568,7 +568,7 @@ export default function LandingPage() {
         </div>
 
         <div className="border-t border-white/10 py-6 text-center text-xs text-white/60">
-          © {new Date().getFullYear()} Nomoosh. All rights reserved.
+          Â© {new Date().getFullYear()} Nomoosh. All rights reserved.
         </div>
       </footer>
     </div>
@@ -580,7 +580,7 @@ export default function LandingPage() {
 const Stat = React.memo(function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div>
-      <div className="text-3xl sm:text-4xl font-extrabold text-[#1c37b3]">{value}</div>
+      <div className="text-3xl sm:text-4xl font-extrabold text-[#f97316]">{value}</div>
       <div className="text-slate-500 mt-1 text-sm sm:text-base">{label}</div>
     </div>
   );
@@ -600,14 +600,14 @@ const MenuRow = React.memo(function MenuRow({
       <div>
         <div className="font-semibold text-slate-900">{title}</div>
         {badge ? (
-          <div className="mt-2 inline-flex px-3 py-1 rounded-full bg-[#eef0ff] text-[#1c37b3] text-xs font-medium">
+          <div className="mt-2 inline-flex px-3 py-1 rounded-full bg-[#fff7ed] text-[#f97316] text-xs font-medium">
             {badge}
           </div>
         ) : (
-          <div className="mt-2 text-xs text-slate-400">—</div>
+          <div className="mt-2 text-xs text-slate-400">â€”</div>
         )}
       </div>
-      <div className="font-bold text-[#1c37b3]">{price}</div>
+      <div className="font-bold text-[#f97316]">{price}</div>
     </div>
   );
 });
@@ -628,7 +628,7 @@ const StepCard = React.memo(function StepCard({
       <div className="absolute right-6 top-6 text-7xl font-extrabold text-slate-100">
         {step}
       </div>
-      <div className="h-14 w-14 rounded-2xl bg-[#eef0ff] text-[#1c37b3] flex items-center justify-center text-2xl">
+      <div className="h-14 w-14 rounded-2xl bg-[#fff7ed] text-[#f97316] flex items-center justify-center text-2xl">
         {icon}
       </div>
       <h3 className="mt-6 font-serif text-xl sm:text-2xl font-bold">{title}</h3>
@@ -640,8 +640,8 @@ const StepCard = React.memo(function StepCard({
 const FeatureBullet = React.memo(function FeatureBullet({ text }: { text: string }) {
   return (
     <li className="flex items-center gap-4 text-base sm:text-lg">
-      <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-white shadow-sm border border-slate-200 flex items-center justify-center text-[#1c37b3] font-bold flex-shrink-0">
-        ✓
+      <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-white shadow-sm border border-slate-200 flex items-center justify-center text-[#f97316] font-bold flex-shrink-0">
+        âœ“
       </div>
       {text}
     </li>
@@ -659,7 +659,7 @@ const FeatureCard = React.memo(function FeatureCard({
 }) {
   return (
     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-7">
-      <div className="h-14 w-14 rounded-2xl bg-[#eef0ff] text-[#1c37b3] flex items-center justify-center text-2xl">
+      <div className="h-14 w-14 rounded-2xl bg-[#fff7ed] text-[#f97316] flex items-center justify-center text-2xl">
         {icon}
       </div>
       <h4 className="mt-6 font-serif text-lg sm:text-xl font-bold">{title}</h4>
@@ -680,18 +680,18 @@ const TestimonialCard = React.memo(function TestimonialCard({
   return (
     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 relative">
       <div className="absolute right-6 top-6 text-4xl text-[#e9ecff] font-extrabold">
-        “”
+        â€œâ€
       </div>
 
       <div className="flex gap-1 text-yellow-500 text-lg">
-        ★★★★★
+        â˜…â˜…â˜…â˜…â˜…
       </div>
 
       <p className="mt-6 text-slate-700 leading-relaxed">&ldquo;{quote}&rdquo;</p>
 
       <div className="mt-10 flex items-center gap-4">
-        <div className="h-12 w-12 rounded-full bg-[#eef0ff] border border-slate-200 flex items-center justify-center">
-          👨‍🍳
+        <div className="h-12 w-12 rounded-full bg-[#fff7ed] border border-slate-200 flex items-center justify-center">
+          ðŸ‘¨â€ðŸ³
         </div>
         <div>
           <div className="font-semibold">{name}</div>
@@ -720,26 +720,26 @@ const RestaurantCard = React.memo(function RestaurantCard({
   return (
     <div
       className={`rounded-3xl border shadow-sm overflow-hidden bg-white ${
-        active ? "border-[#1c37b3]" : "border-slate-200"
+        active ? "border-[#f97316]" : "border-slate-200"
       }`}
     >
       <div className="h-36 bg-gradient-to-b from-slate-50 to-slate-100 flex items-center justify-center text-4xl">
-        🍽️
+        ðŸ½ï¸
       </div>
 
       <div className="p-5">
         <div className="flex items-start justify-between gap-2">
           <h3 className="font-serif text-xl font-bold">{title}</h3>
           <div className="flex items-center gap-2 text-sm">
-            ⭐ <span className="font-semibold">{rating}</span>
+            â­ <span className="font-semibold">{rating}</span>
           </div>
         </div>
 
         <p className="text-slate-500 mt-2 text-sm">{meta}</p>
 
         <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
-          <span>📍 {distance}</span>
-          <span>🕒 {time}</span>
+          <span>ðŸ“ {distance}</span>
+          <span>ðŸ•’ {time}</span>
         </div>
       </div>
     </div>
@@ -760,3 +760,4 @@ const FooterCol = React.memo(function FooterCol({ title, items }: { title: strin
     </div>
   );
 });
+

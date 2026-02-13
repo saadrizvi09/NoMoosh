@@ -415,7 +415,7 @@ export default function Page() {
               <div className="flex items-center justify-between h-full">
                 {/* left brand */}
                 <div className="flex items-center gap-2">
-                  <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-lg bg-[#1c37b3] text-white flex items-center justify-center font-extrabold text-xs sm:text-sm shadow-sm">N</div>
+                  <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-lg bg-[#f97316] text-white flex items-center justify-center font-extrabold text-xs sm:text-sm shadow-sm">N</div>
                   <a href="/" className="text-white font-bold text-base sm:text-xl hover:opacity-90">
                     Nomoosh
                   </a>
@@ -434,7 +434,7 @@ export default function Page() {
                         className="flex items-center gap-2 hover:bg-white/10 rounded-full p-1.5 pr-3 transition-colors"
                         aria-label="User menu"
                       >
-                        <div className="h-8 w-8 rounded-full bg-white text-[#1c37b3] flex items-center justify-center font-semibold text-sm shadow">
+                        <div className="h-8 w-8 rounded-full bg-white text-[#f97316] flex items-center justify-center font-semibold text-sm shadow">
                           {loggedInUserName.charAt(0).toUpperCase()}
                         </div>
                         <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -495,7 +495,7 @@ export default function Page() {
                       className="flex items-center gap-2 hover:bg-white/10 rounded-full p-1 transition-colors"
                       aria-label="User menu"
                     >
-                      <div className="h-8 w-8 rounded-full bg-white text-[#1c37b3] flex items-center justify-center font-semibold text-sm shadow">
+                      <div className="h-8 w-8 rounded-full bg-white text-[#f97316] flex items-center justify-center font-semibold text-sm shadow">
                         {loggedInUserName.charAt(0).toUpperCase()}
                       </div>
                     </button>
@@ -569,7 +569,7 @@ export default function Page() {
               <div className="mt-8 flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <button
                   onClick={openRegisterModal}
-                  className="relative inline-flex items-center justify-center gap-2 bg-[#1c37b3] hover:opacity-90 text-white px-6 py-3 rounded-xl font-semibold shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                  className="relative inline-flex items-center justify-center gap-2 bg-[#f97316] hover:opacity-90 text-white px-6 py-3 rounded-xl font-semibold shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
                 >
                   <span className="i-heroicon-qr-code" aria-hidden />
                   Register your restaurant
@@ -727,7 +727,7 @@ export default function Page() {
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#1c37b3] text-white text-sm font-bold">1</span>
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#f97316] text-white text-sm font-bold">1</span>
                 <h4 className="text-lg font-semibold">Register your restaurant</h4>
               </div>
               <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 rounded">✕</button>
@@ -790,7 +790,7 @@ export default function Page() {
                   <input
                     value={otpValue}
                     onChange={(e) => setOtpValue(e.target.value)}
-                    className="w-full border border-gray-300 focus:border-[#1c37b3] focus:ring-2 focus:ring-blue-200 rounded-lg p-3 mt-1 tracking-[0.3em] text-center font-semibold text-sm"
+                    className="w-full border border-gray-300 focus:border-[#f97316] focus:ring-2 focus:ring-blue-200 rounded-lg p-3 mt-1 tracking-[0.3em] text-center font-semibold text-sm"
                     placeholder="0 0 0 0 0 0 0 0"
                     inputMode="numeric"
                     maxLength={8}
@@ -886,7 +886,7 @@ function Feature({
       whileTap={{ scale: 0.98 }}     // 👈 shrink a bit on tap
       className="bg-white rounded-2xl p-6 shadow-sm ring-1 ring-gray-100 text-left cursor-pointer"
     >
-      <div className="mb-4 inline-flex items-center justify-center w-16 h-16 rounded-xl bg-blue-50 text-[#1c37b3]">
+      <div className="mb-4 inline-flex items-center justify-center w-16 h-16 rounded-xl bg-blue-50 text-[#f97316]">
         {icon}
       </div>
       <h4 className="font-semibold text-lg mb-2 tracking-tight">{title}</h4>
@@ -905,7 +905,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   const { className = "", ...rest } = props;
   return (
     <input
-      className={`w-full border border-gray-300 focus:border-[#1c37b3] focus:ring-2 focus:ring-blue-200 rounded-lg p-3 mt-1 placeholder:text-gray-400 ${className}`}
+      className={`w-full border border-gray-300 focus:border-[#f97316] focus:ring-2 focus:ring-blue-200 rounded-lg p-3 mt-1 placeholder:text-gray-400 ${className}`}
       {...rest}
     />
   );
@@ -914,7 +914,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
 function PrimaryButton({ children, className = "", ...rest }: any) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 bg-[#1c37b3] hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${className}`}
+      className={`inline-flex items-center justify-center gap-2 bg-[#f97316] hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${className}`}
       {...rest}
     >
       {children}

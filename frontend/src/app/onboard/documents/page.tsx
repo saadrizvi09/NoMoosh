@@ -214,7 +214,7 @@ export default function DocumentsPage() {
 
                 <button
                   onClick={handleVerify}
-                  className={`px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 transition ${
+                  className={`px-6 py-3 bg-[#f97316] text-white rounded-xl shadow hover:opacity-90 transition ${
                     verifying ? "opacity-80 cursor-wait" : ""
                   }`}
                   disabled={verifying}
@@ -299,7 +299,7 @@ export default function DocumentsPage() {
               </button>
               <button
                 onClick={handleGoHome}
-                className="px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 font-semibold"
+                className="px-6 py-3 bg-[#f97316] text-white rounded-xl shadow hover:opacity-90 font-semibold"
               >
                 Create Owner Account →
               </button>

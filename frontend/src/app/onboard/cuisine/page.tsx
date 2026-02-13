@@ -482,7 +482,7 @@ export default function CuisineTimingsPage() {
                 <button
                   onClick={handleSaveContinue}
                   disabled={saving}
-                  className={`px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 transition ${
+                  className={`px-6 py-3 bg-[#f97316] text-white rounded-xl shadow hover:opacity-90 transition ${
                     saving ? "opacity-70 cursor-not-allowed" : ""
                   }`}
                 >
@@ -507,7 +507,7 @@ export default function CuisineTimingsPage() {
               <p className="text-slate-600 mb-6">Please complete Cuisine & Time slots before continuing to Documents.</p>
               <button
                 onClick={() => setShowValidationModal(false)}
-                className="w-full px-4 py-2.5 rounded-xl bg-[#1c37b3] text-white font-medium hover:opacity-90 transition"
+                className="w-full px-4 py-2.5 rounded-xl bg-[#f97316] text-white font-medium hover:opacity-90 transition"
               >
                 OK
               </button>

@@ -30,6 +30,19 @@ router = APIRouter(tags=["orders"])
 
 # In-memory payment auto-unlock timers
 _payment_timers: dict[str, asyncio.Task] = {}
+# In-memory payment lock owner tracking (session_id → participant_id)
+_payment_lock_owners: dict[str, str] = {}
+
+
+def _safe_session_update(sb, session_id: str, fields: dict):
+    """Update session, retrying without new columns if they don't exist yet."""
+    try:
+        sb.table("sessions").update(fields).eq("id", session_id).execute()
+    except Exception:
+        # Fallback: strip columns that may not exist in DB yet
+        safe = {k: v for k, v in fields.items() if k in ("status", "payment_lock")}
+        if safe:
+            sb.table("sessions").update(safe).eq("id", session_id).execute()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -284,13 +297,19 @@ async def get_session_status(session_id: str):
         .execute()
     )
 
+    # Count participants for split bill
+    participants = sb.table("participants").select("id").eq("session_id", session_id).execute()
+    participant_count = len(participants.data) if participants.data else 1
+
     return {
         "session_status": s["status"],
         "payment_lock": s.get("payment_lock", False),
         "payment_lock_at": s.get("payment_lock_at"),
+        "payment_locked_by": s.get("payment_locked_by") or _payment_lock_owners.get(session_id),
         "chef_eta_minutes": s.get("chef_eta_minutes"),
         "chef_eta_set_at": s.get("chef_eta_set_at"),
         "order": order.data[0] if order.data else None,
+        "participant_count": participant_count,
     }
 
 
@@ -308,10 +327,12 @@ async def lock_payment(data: PaymentLockRequest):
         raise HTTPException(status_code=423, detail="Payment already locked")
 
     now = datetime.now(timezone.utc).isoformat()
-    sb.table("sessions").update({
+    _safe_session_update(sb, data.session_id, {
         "payment_lock": True,
         "payment_lock_at": now,
-    }).eq("id", data.session_id).execute()
+        "payment_locked_by": data.participant_id,
+    })
+    _payment_lock_owners[data.session_id] = data.participant_id
 
     # Broadcast lock
     await ws_manager.broadcast(data.session_id, {
@@ -326,7 +347,8 @@ async def lock_payment(data: PaymentLockRequest):
         sb2 = get_supabase()
         s = sb2.table("sessions").select("payment_lock, status").eq("id", data.session_id).execute()
         if s.data and s.data[0].get("payment_lock") and s.data[0]["status"] == "active":
-            sb2.table("sessions").update({"payment_lock": False, "payment_lock_at": None}).eq("id", data.session_id).execute()
+            _safe_session_update(sb2, data.session_id, {"payment_lock": False, "payment_lock_at": None, "payment_locked_by": None})
+            _payment_lock_owners.pop(data.session_id, None)
             await ws_manager.broadcast(data.session_id, {"type": "payment_unlocked"})
 
     if data.session_id in _payment_timers:
@@ -334,6 +356,30 @@ async def lock_payment(data: PaymentLockRequest):
     _payment_timers[data.session_id] = asyncio.create_task(auto_unlock())
 
     return {"message": "Cart locked for payment", "timeout_seconds": 120}
+
+
+@router.post("/payment/unlock")
+async def unlock_payment(data: PaymentLockRequest):
+    """Unlock payment (back button) — only the locker can unlock."""
+    sb = get_supabase()
+    session = sb.table("sessions").select("*").eq("id", data.session_id).execute()
+    if not session.data:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.data[0].get("payment_lock"):
+        return {"message": "Already unlocked"}
+
+    _safe_session_update(sb, data.session_id, {
+        "payment_lock": False,
+        "payment_lock_at": None,
+        "payment_locked_by": None,
+    })
+    _payment_lock_owners.pop(data.session_id, None)
+    if data.session_id in _payment_timers:
+        _payment_timers[data.session_id].cancel()
+        del _payment_timers[data.session_id]
+
+    await ws_manager.broadcast(data.session_id, {"type": "payment_unlocked"})
+    return {"message": "Payment unlocked"}
 
 
 @router.post("/payment/confirm")
@@ -407,10 +453,12 @@ async def confirm_payment(data: PaymentConfirmRequest):
     }).execute()
 
     # Complete session
-    sb.table("sessions").update({
+    _safe_session_update(sb, data.session_id, {
         "status": "completed",
         "payment_lock": False,
-    }).eq("id", data.session_id).execute()
+        "payment_locked_by": None,
+    })
+    _payment_lock_owners.pop(data.session_id, None)
 
     # Table → dirty
     sb.table("restaurant_tables").update({"status": "dirty"}).eq("id", s["table_id"]).execute()

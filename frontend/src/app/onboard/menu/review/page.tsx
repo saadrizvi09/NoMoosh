@@ -642,7 +642,7 @@ export default function ReviewParsedMenuPage() {
               <button
                 onClick={handleSaveAndContinue}
                 disabled={saving || uploadingAny}
-                className={`px-6 py-3 bg-[#1c37b3] text-white rounded-xl shadow hover:opacity-90 font-medium ${saving || uploadingAny ? "opacity-70 cursor-not-allowed" : ""}`}
+                className={`px-6 py-3 bg-[#f97316] text-white rounded-xl shadow hover:opacity-90 font-medium ${saving || uploadingAny ? "opacity-70 cursor-not-allowed" : ""}`}
               >
                 {saving ? "Saving..." : "Save & Continue →"}
               </button>
@@ -664,7 +664,7 @@ export default function ReviewParsedMenuPage() {
             <p className="text-slate-600 mb-6">Please complete Menu Info before continuing to Cuisine & Time slots.</p>
             <button
               onClick={() => setShowValidationModal(false)}
-              className="w-full px-4 py-2.5 rounded-xl bg-[#1c37b3] text-white font-medium hover:opacity-90 transition"
+              className="w-full px-4 py-2.5 rounded-xl bg-[#f97316] text-white font-medium hover:opacity-90 transition"
             >
               OK
             </button>

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet, apiPost, apiPut, apiDelete, getWsBase } from "@/lib/api";
 
-const BRAND = "#1c37b3";
+const BRAND = "#f97316";
 const API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 // Use production URL for QR codes so they work from anywhere
 const FRONTEND = process.env.NEXT_PUBLIC_FRONTEND_URL || "https://no-moosh.vercel.app";

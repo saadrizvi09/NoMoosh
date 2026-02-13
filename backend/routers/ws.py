@@ -18,6 +18,14 @@ from supabase_client import get_supabase
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Import in-memory lock owners from orders module (lazy to avoid circular)
+def _get_lock_owner(session_id: str) -> str | None:
+    try:
+        from routers.orders import _payment_lock_owners
+        return _payment_lock_owners.get(session_id)
+    except Exception:
+        return None
+
 
 # ── Shared helpers: build state payloads ───────────────────
 
@@ -80,12 +88,17 @@ def _get_session_state(session_id: str) -> dict:
         .limit(1)
         .execute()
     )
+    # Count participants
+    participants = sb.table("participants").select("id", count="exact").eq("session_id", session_id).execute()
+    participant_count = participants.count if participants.count else 1
     return {
         "session_status": s["status"],
         "payment_lock": s.get("payment_lock", False),
+        "payment_locked_by": s.get("payment_locked_by") or _get_lock_owner(session_id),
         "chef_eta_minutes": s.get("chef_eta_minutes"),
         "chef_eta_set_at": s.get("chef_eta_set_at"),
         "order": order.data[0] if order.data else None,
+        "participant_count": participant_count,
     }
 
 

@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiPost } from "@/lib/api";
 
-const BRAND = "#1c37b3";
+const BRAND = "#f97316";
 
 export default function StaffSignupPage() {
   const router = useRouter();

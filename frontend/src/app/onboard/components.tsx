@@ -1,10 +1,10 @@
-"use client";
+﻿"use client";
 
 import React from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-/* ─── Types ─── */
+/* â”€â”€â”€ Types â”€â”€â”€ */
 export type StepStatus = "completed" | "active" | "upcoming";
 
 export type StepInfo = {
@@ -15,7 +15,7 @@ export type StepInfo = {
   onClick?: () => void;
 };
 
-/* ─── Helper: build steps array ─── */
+/* â”€â”€â”€ Helper: build steps array â”€â”€â”€ */
 export function buildSteps(
   currentStep: number,
   completions: { details?: boolean; menu?: boolean; cuisine?: boolean; docs?: boolean },
@@ -44,7 +44,7 @@ export function buildSteps(
   });
 }
 
-/* ─── Header ─── */
+/* â”€â”€â”€ Header â”€â”€â”€ */
 export function OnboardHeader({ currentStep = 1 }: { currentStep?: number }) {
   const router = useRouter();
   const [showUserMenu, setShowUserMenu] = React.useState(false);
@@ -80,7 +80,7 @@ export function OnboardHeader({ currentStep = 1 }: { currentStep?: number }) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         {/* Logo */}
         <a href="/" className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-lg bg-[#1c37b3] text-white flex items-center justify-center font-extrabold text-sm shadow-sm">
+          <div className="h-8 w-8 rounded-lg bg-[#f97316] text-white flex items-center justify-center font-extrabold text-sm shadow-sm">
             N
           </div>
           <span className="font-bold text-slate-800 text-[15px]">Nomoosh</span>
@@ -97,7 +97,7 @@ export function OnboardHeader({ currentStep = 1 }: { currentStep?: number }) {
               <div
                 key={n}
                 className={`h-1.5 w-7 rounded-full transition-all ${
-                  n <= currentStep ? "bg-[#1c37b3]" : "bg-slate-200"
+                  n <= currentStep ? "bg-[#f97316]" : "bg-slate-200"
                 }`}
               />
             ))}
@@ -110,7 +110,7 @@ export function OnboardHeader({ currentStep = 1 }: { currentStep?: number }) {
             Need help?{" "}
             <a
               href="tel:7091863593"
-              className="text-[#1c37b3] font-medium hover:underline"
+              className="text-[#f97316] font-medium hover:underline"
             >
               7091863593
             </a>
@@ -124,7 +124,7 @@ export function OnboardHeader({ currentStep = 1 }: { currentStep?: number }) {
                 className="flex items-center gap-2 hover:bg-slate-50 rounded-full p-1.5 pr-3 transition-colors"
                 aria-label="User menu"
               >
-                <div className="h-8 w-8 rounded-full bg-[#1c37b3] text-white flex items-center justify-center font-semibold text-sm">
+                <div className="h-8 w-8 rounded-full bg-[#f97316] text-white flex items-center justify-center font-semibold text-sm">
                   {userName.charAt(0).toUpperCase()}
                 </div>
                 <svg className="w-4 h-4 text-slate-600 hidden sm:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -164,7 +164,7 @@ export function OnboardHeader({ currentStep = 1 }: { currentStep?: number }) {
   );
 }
 
-/* ─── Sidebar ─── */
+/* â”€â”€â”€ Sidebar â”€â”€â”€ */
 export function OnboardSidebar({ steps }: { steps: StepInfo[] }) {
   const router = useRouter();
 
@@ -209,7 +209,7 @@ export function OnboardSidebar({ steps }: { steps: StepInfo[] }) {
                       step.status === "completed"
                         ? "bg-emerald-500 border-emerald-500 text-white"
                         : step.status === "active"
-                        ? "bg-[#1c37b3] border-[#1c37b3] text-white"
+                        ? "bg-[#f97316] border-[#f97316] text-white"
                         : "bg-white border-slate-300 text-slate-400"
                     }`}
                   >
@@ -271,7 +271,7 @@ export function OnboardSidebar({ steps }: { steps: StepInfo[] }) {
       {/* Referral card */}
       <div className="mt-3 bg-white rounded-xl p-4 border border-slate-100 shadow-sm">
         <div className="text-xs text-slate-600">Did someone refer you?</div>
-        <div className="text-xs text-[#1c37b3] font-medium mt-1 cursor-pointer hover:underline">
+        <div className="text-xs text-[#f97316] font-medium mt-1 cursor-pointer hover:underline">
           Enter referral code
         </div>
       </div>
@@ -279,7 +279,7 @@ export function OnboardSidebar({ steps }: { steps: StepInfo[] }) {
   );
 }
 
-/* ─── Mobile Bottom Nav ─── */
+/* â”€â”€â”€ Mobile Bottom Nav â”€â”€â”€ */
 export function OnboardMobileNav({ steps }: { steps: StepInfo[] }) {
   const router = useRouter();
   const labels = ["Info", "Menu", "Cuisine", "Docs"];
@@ -297,7 +297,7 @@ export function OnboardMobileNav({ steps }: { steps: StepInfo[] }) {
               }
               className={`py-2.5 flex flex-col items-center gap-1 text-[10px] font-medium transition ${
                 step.status === "active"
-                  ? "text-[#1c37b3]"
+                  ? "text-[#f97316]"
                   : step.status === "completed"
                   ? "text-emerald-600"
                   : "text-slate-400"
@@ -306,13 +306,13 @@ export function OnboardMobileNav({ steps }: { steps: StepInfo[] }) {
               <div
                 className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
                   step.status === "active"
-                    ? "bg-[#1c37b3] text-white"
+                    ? "bg-[#f97316] text-white"
                     : step.status === "completed"
                     ? "bg-emerald-500 text-white"
                     : "bg-slate-200 text-slate-500"
                 }`}
               >
-                {step.status === "completed" ? "✓" : stepNum}
+                {step.status === "completed" ? "âœ“" : stepNum}
               </div>
               <span>{labels[idx]}</span>
             </button>
@@ -324,7 +324,7 @@ export function OnboardMobileNav({ steps }: { steps: StepInfo[] }) {
   );
 }
 
-/* ─── Onboard page shell (wraps form content) ─── */
+/* â”€â”€â”€ Onboard page shell (wraps form content) â”€â”€â”€ */
 export function OnboardShell({
   currentStep,
   steps,
@@ -357,3 +357,4 @@ export function OnboardShell({
     </div>
   );
 }
+

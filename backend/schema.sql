@@ -244,7 +244,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     status        session_status DEFAULT 'active',
     created_at    TIMESTAMPTZ DEFAULT now(),
     expires_at    TIMESTAMPTZ,
-    payment_lock  BOOLEAN DEFAULT FALSE,
+    payment_lock      BOOLEAN DEFAULT FALSE,
+    payment_locked_by TEXT,
+    payment_lock_at   TIMESTAMPTZ,
     FOREIGN KEY (table_id)      REFERENCES restaurant_tables(id),
     FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
 );
