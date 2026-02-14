@@ -164,18 +164,32 @@ export default function TablePage() {
 
   /* ── 3. Session WS ─────────────────────────────────── */
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      console.log('[WS] No sessionId yet, waiting...');
+      return;
+    }
+    console.log(`[WS] Setting up connection for session: ${sessionId.substring(0, 8)}`);
     let alive = true;
     let pi: NodeJS.Timeout | null = null;
     const connect = () => {
       if (!alive || !mountedRef.current) return;
-      const ws = new WebSocket(`${getWsBase()}/ws/${sessionId}`);
+      const wsUrl = `${getWsBase()}/ws/${sessionId}`;
+      console.log(`[WS] Connecting to: ${wsUrl}`);
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
-      ws.onopen = () => { wsConnectedRef.current = true; rdRef.current = 1000; pi = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" })); }, 30000); };
+      ws.onopen = () => { 
+        console.log(`[WS] ✅ Connected! session=${sessionId.substring(0, 8)}`);
+        wsConnectedRef.current = true; 
+        rdRef.current = 1000; 
+        pi = setInterval(() => { 
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" })); 
+        }, 30000); 
+      };
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
           if (msg.type === "pong") return;
+          console.log(`[WS] ⬇️  Received ${msg.type}:`, msg);
           if (msg.type === "init") {
             const c = msg.cart || {}; setCart(c.items || []); setCartTotal(c.total || 0);
             const s = msg.session || {};
@@ -186,11 +200,13 @@ export default function TablePage() {
             } else if (s.payment_lock) { setPaymentLocked(true); setPaymentLockedBy(s.payment_locked_by || ""); setPhase("payment"); }
           }
           else if (msg.type === "cart_update" && msg.cart) {
+            console.log(`[WS] 🛒 Cart update received - ${msg.cart.items?.length || 0} items, total: ₹${msg.cart.total}`);
             // Redis is atomic — always accept the latest broadcast as source of truth
             setCart(msg.cart.items || []);
             setCartTotal(msg.cart.total || 0);
           }
           else if (msg.type === "error") {
+            console.error('[WS] ❌ Error from server:', msg.message);
             // Backend rejected operation — force sync to get correct state
             if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "sync" }));
             setError(msg.message || "Operation failed");
@@ -201,11 +217,31 @@ export default function TablePage() {
           else if (msg.type === "chef_eta") { setChefEtaMinutes(msg.minutes); setChefEtaSetAt(msg.set_at); setPhase("countdown"); }
         } catch {}
       };
-      ws.onclose = () => { wsConnectedRef.current = false; if (pi) clearInterval(pi); if (alive && mountedRef.current) { const d = rdRef.current; rdRef.current = Math.min(d * 2, 30000); reconnectTimerRef.current = setTimeout(connect, d); } };
-      ws.onerror = () => ws.close();
+      ws.onclose = () => { 
+        console.log(`[WS] ⚠️ Connection closed for session=${sessionId.substring(0, 8)}`);
+        wsConnectedRef.current = false; 
+        if (pi) clearInterval(pi); 
+        if (alive && mountedRef.current) { 
+          const d = rdRef.current; 
+          rdRef.current = Math.min(d * 2, 30000); 
+          console.log(`[WS] Reconnecting in ${d}ms...`);
+          reconnectTimerRef.current = setTimeout(connect, d); 
+        } 
+      };
+      ws.onerror = (err) => {
+        console.error('[WS] ❌ WebSocket error:', err);
+        ws.close();
+      };
     };
     connect();
-    return () => { alive = false; if (pi) clearInterval(pi); if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); wsRef.current?.close(); wsConnectedRef.current = false; };
+    return () => { 
+      console.log(`[WS] Cleaning up connection for session=${sessionId.substring(0, 8)}`);
+      alive = false; 
+      if (pi) clearInterval(pi); 
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); 
+      wsRef.current?.close(); 
+      wsConnectedRef.current = false; 
+    };
   }, [sessionId]);
 
   /* ── 4. Timers ─────────────────────────────────────── */
@@ -215,13 +251,19 @@ export default function TablePage() {
   /* ── Cart actions — via WebSocket → Redis (instant, atomic) ── */
   const sendCartMsg = useCallback((msg: Record<string, unknown>) => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      console.log('[WS] ⬆️  Sending:', msg);
+      ws.send(JSON.stringify(msg));
+    } else {
+      console.error('[WS] ❌ Cannot send - WebSocket not open. State:', ws?.readyState);
+    }
   }, []);
 
   const addToCart = (menuItemId: number) => {
     if (paymentLocked) return;
     const mi = menu.find(m => m.id === menuItemId);
     if (mi) {
+      console.log(`[CART] Adding ${mi.dish_name} (id=${menuItemId})`);
       // Optimistic UI
       setCart(prev => {
         const ex = prev.find(c => c.menu_item_id === menuItemId);

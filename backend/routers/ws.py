@@ -257,10 +257,10 @@ async def session_ws(websocket: WebSocket, session_id: str):
                     await cart_incr(session_id, item_id, delta)
                     await cart_bump_version(session_id)
                     enriched = await get_enriched_cart(session_id, restaurant_id)
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
                     )
-                    logger.info(f"[WS] cart_add item={item_id} session={session_id[:8]} → broadcast to {manager.count(session_id)} users")
+                    logger.info(f"[WS] cart_add item={item_id} session={session_id[:8]} → created broadcast task for {manager.count(session_id)} users")
 
                 elif msg_type == "cart_remove":
                     if not restaurant_id:
@@ -271,10 +271,10 @@ async def session_ws(websocket: WebSocket, session_id: str):
                     await cart_remove_item(session_id, item_id)
                     await cart_bump_version(session_id)
                     enriched = await get_enriched_cart(session_id, restaurant_id)
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
                     )
-                    logger.info(f"[WS] cart_remove item={item_id} session={session_id[:8]} → broadcast to {manager.count(session_id)} users")
+                    logger.info(f"[WS] cart_remove item={item_id} session={session_id[:8]} → created broadcast task for {manager.count(session_id)} users")
 
                 elif msg_type == "cart_set_qty":
                     if not restaurant_id:
@@ -289,10 +289,10 @@ async def session_ws(websocket: WebSocket, session_id: str):
                         await cart_set_qty(session_id, item_id, qty)
                     await cart_bump_version(session_id)
                     enriched = await get_enriched_cart(session_id, restaurant_id)
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
                     )
-                    logger.info(f"[WS] cart_set_qty item={item_id} qty={qty} session={session_id[:8]} → broadcast to {manager.count(session_id)} users")
+                    logger.info(f"[WS] cart_set_qty item={item_id} qty={qty} session={session_id[:8]} → created broadcast task for {manager.count(session_id)} users")
 
             except json.JSONDecodeError:
                 logger.warning(f"[WS] Bad JSON from {session_id[:8]}")

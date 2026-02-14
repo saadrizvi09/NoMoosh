@@ -1,8 +1,10 @@
 """WebSocket connection manager — singleton shared across routers."""
 
 from __future__ import annotations
-import json
+import json, logging
 from fastapi import WebSocket
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
@@ -16,25 +18,35 @@ class ConnectionManager:
         if session_id not in self.active_connections:
             self.active_connections[session_id] = []
         self.active_connections[session_id].append(websocket)
+        logger.info(f"[Manager] Connected to {session_id[:8]}, total connections: {len(self.active_connections[session_id])}")
 
     def disconnect(self, session_id: str, websocket: WebSocket):
         if session_id in self.active_connections:
             try:
                 self.active_connections[session_id].remove(websocket)
+                logger.info(f"[Manager] Disconnected from {session_id[:8]}, remaining: {len(self.active_connections[session_id])}")
             except ValueError:
                 pass
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
+                logger.info(f"[Manager] No connections left for {session_id[:8]}, removed channel")
 
     async def broadcast(self, session_id: str, message: dict):
         if session_id not in self.active_connections:
+            logger.warning(f"[Manager] ⚠️ Cannot broadcast to {session_id[:8]} - no active connections!")
             return
+        conns = self.active_connections[session_id]
+        logger.info(f"[Manager] 📡 Broadcasting '{message.get('type')}' to {len(conns)} connection(s) in {session_id[:8]}")
         dead: list[WebSocket] = []
-        for conn in self.active_connections[session_id]:
+        success_count = 0
+        for conn in conns:
             try:
                 await conn.send_json(message)
-            except Exception:
+                success_count += 1
+            except Exception as e:
+                logger.error(f"[Manager] Failed to send to connection: {e}")
                 dead.append(conn)
+        logger.info(f"[Manager] ✅ Sent to {success_count}/{len(conns)} connections, {len(dead)} dead")
         for d in dead:
             self.disconnect(session_id, d)
 
