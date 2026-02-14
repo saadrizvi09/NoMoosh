@@ -190,7 +190,17 @@ export default function TablePage() {
               else setPhase("confirmed");
             } else if (s.payment_lock) { setPaymentLocked(true); setPaymentLockedBy(s.payment_locked_by || ""); setPhase("payment"); }
           }
-          else if (msg.type === "cart_update" && msg.cart) { setCart(msg.cart.items || []); setCartTotal(msg.cart.total || 0); setCartVersion(msg.cart.version || 0); }
+          else if (msg.type === "cart_update" && msg.cart) { 
+            // Only update if incoming version is newer (prevents optimistic update overwrites)
+            setCartVersion(prev => {
+              if ((msg.cart.version || 0) > prev) {
+                setCart(msg.cart.items || []); 
+                setCartTotal(msg.cart.total || 0);
+                return msg.cart.version || 0;
+              }
+              return prev;
+            });
+          }
           else if (msg.type === "payment_locked") { setPaymentLocked(true); setPaymentLockedBy(msg.locked_by || ""); setPhase("payment"); }
           else if (msg.type === "payment_unlocked") { setPaymentLocked(false); setPaymentLockedBy(""); setPhase("menu"); }
           else if (msg.type === "order_confirmed") { setOrderId(msg.order_id); setOrderTotal(msg.total); setPhase("confirmed"); }
@@ -220,11 +230,8 @@ export default function TablePage() {
     const items = Object.entries(merged).filter(([, d]) => d !== 0).map(([id, delta]) => ({ menu_item_id: Number(id), delta }));
     if (items.length === 0) { flushingRef.current = false; return; }
     try {
-      const r = await apiPost("/cart/batch", { session_id: sessionId, participant_id: participantId, operations: items });
-      setCartVersion(prev => {
-        if ((r.version || 0) > prev) { setCart(r.items || []); setCartTotal(r.total || 0); return r.version || 0; }
-        return prev;
-      });
+      // Send batch request - don't reconcile from response, let WebSocket handle it
+      await apiPost("/cart/batch", { session_id: sessionId, participant_id: participantId, operations: items });
     } catch {}
     flushingRef.current = false;
     // If more ops queued during flush, flush again
