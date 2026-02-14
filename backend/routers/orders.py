@@ -186,10 +186,11 @@ async def add_to_cart(data: AddToCartRequest):
     new_ver = cart.data[0]["version"] + 1
     sb.table("carts").update({"version": new_ver, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", cart_id).execute()
 
+    # Enrich cart once
     result = _enrich_cart(sb, data.session_id)
 
-    # Broadcast via WebSocket
-    await ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result})
+    # Broadcast in background (non-blocking)
+    asyncio.create_task(ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result}))
 
     return result
 
@@ -203,7 +204,7 @@ async def remove_from_cart(data: RemoveFromCartRequest):
 
     sb.table("cart_items").delete().eq("id", data.cart_item_id).execute()
     result = _enrich_cart(sb, data.session_id)
-    await ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result})
+    asyncio.create_task(ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result}))
     return result
 
 
@@ -220,7 +221,7 @@ async def update_cart_quantity(data: UpdateCartQtyRequest):
         sb.table("cart_items").update({"quantity": data.quantity}).eq("id", data.cart_item_id).execute()
 
     result = _enrich_cart(sb, data.session_id)
-    await ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result})
+    asyncio.create_task(ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result}))
     return result
 
 

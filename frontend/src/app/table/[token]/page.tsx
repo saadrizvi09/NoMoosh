@@ -219,7 +219,18 @@ export default function TablePage() {
       });
       setCartTotal(p => p + mi.price);
     }
-    try { const r = await apiPost("/cart/add", { session_id: sessionId, menu_item_id: menuItemId, quantity: 1, participant_id: participantId }); setCart(r.items || []); setCartTotal(r.total || 0); setCartVersion(r.version || 0); } catch {}
+    try { 
+      const r = await apiPost("/cart/add", { session_id: sessionId, menu_item_id: menuItemId, quantity: 1, participant_id: participantId }); 
+      // Only reconcile if this response is newer than current state (prevents slow API responses from overwriting fast WS updates)
+      setCartVersion(prev => {
+        if ((r.version || 0) > prev) {
+          setCart(r.items || []);
+          setCartTotal(r.total || 0);
+          return r.version || 0;
+        }
+        return prev;
+      });
+    } catch {}
     setCartBusy(false);
   };
 
@@ -228,7 +239,17 @@ export default function TablePage() {
     setCartBusy(true);
     const it = cart.find(c => c.id === cartItemId);
     if (it) { setCart(prev => prev.filter(c => c.id !== cartItemId)); setCartTotal(p => p - it.price * it.quantity); }
-    try { const r = await apiPost("/cart/remove", { session_id: sessionId, cart_item_id: cartItemId }); setCart(r.items || []); setCartTotal(r.total || 0); } catch {}
+    try { 
+      const r = await apiPost("/cart/remove", { session_id: sessionId, cart_item_id: cartItemId }); 
+      setCartVersion(prev => {
+        if ((r.version || 0) > prev) {
+          setCart(r.items || []);
+          setCartTotal(r.total || 0);
+          return r.version || 0;
+        }
+        return prev;
+      });
+    } catch {}
     setCartBusy(false);
   };
 
@@ -240,7 +261,17 @@ export default function TablePage() {
       if (qty <= 0) { setCart(prev => prev.filter(c => c.id !== cartItemId)); setCartTotal(p => p - it.price * it.quantity); }
       else { setCart(prev => prev.map(c => c.id === cartItemId ? { ...c, quantity: qty } : c)); setCartTotal(p => p + it.price * (qty - it.quantity)); }
     }
-    try { const r = await apiPost("/cart/update-quantity", { session_id: sessionId, cart_item_id: cartItemId, quantity: qty }); setCart(r.items || []); setCartTotal(r.total || 0); } catch {}
+    try { 
+      const r = await apiPost("/cart/update-quantity", { session_id: sessionId, cart_item_id: cartItemId, quantity: qty }); 
+      setCartVersion(prev => {
+        if ((r.version || 0) > prev) {
+          setCart(r.items || []);
+          setCartTotal(r.total || 0);
+          return r.version || 0;
+        }
+        return prev;
+      });
+    } catch {}
     setCartBusy(false);
   };
 
