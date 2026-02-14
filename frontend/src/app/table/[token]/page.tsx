@@ -55,7 +55,6 @@ export default function TablePage() {
   const [error, setError] = useState("");
   const [paymentCountdown, setPaymentCountdown] = useState(0);
   const [activeCategory, setActiveCategory] = useState("");
-  const [cartBusy, setCartBusy] = useState(false);
   const [participantCount, setParticipantCount] = useState(1);
   const [showSplit, setShowSplit] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -64,6 +63,10 @@ export default function TablePage() {
   const wsConnectedRef = useRef(false);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
+  const cartQueueRef = useRef<{ menu_item_id: number; delta: number }[]>([]);
+  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const flushingRef = useRef(false);
+  const rdRef = useRef(1000);
 
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
@@ -165,7 +168,6 @@ export default function TablePage() {
   }, [phase, qrToken, checkTable]);
 
   /* ── 3. Session WS ─────────────────────────────────── */
-  const rdRef = useRef(1000);
   useEffect(() => {
     if (!sessionId) return;
     let alive = true;
@@ -206,10 +208,37 @@ export default function TablePage() {
   useEffect(() => { if (phase !== "countdown" && phase !== "payment") return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, [phase]);
   useEffect(() => { if (phase !== "payment") { setPaymentCountdown(0); return; } const id = setInterval(() => setPaymentCountdown(p => p <= 0 ? 120 : p - 1), 1000); setPaymentCountdown(120); return () => clearInterval(id); }, [phase]);
 
-  /* ── Cart actions — OPTIMISTIC ──────────────────────── */
-  const addToCart = async (menuItemId: number) => {
-    if (paymentLocked || cartBusy) return;
-    setCartBusy(true);
+  /* ── Cart actions — QUEUE + BATCH (instant, no blocking) ── */
+  const flushCartQueue = useCallback(async () => {
+    if (flushingRef.current || cartQueueRef.current.length === 0 || !sessionId) return;
+    flushingRef.current = true;
+    const ops = [...cartQueueRef.current];
+    cartQueueRef.current = [];
+    // Merge same-item ops: {menu_item_id: totalDelta}
+    const merged: Record<number, number> = {};
+    for (const op of ops) merged[op.menu_item_id] = (merged[op.menu_item_id] || 0) + op.delta;
+    const items = Object.entries(merged).filter(([, d]) => d !== 0).map(([id, delta]) => ({ menu_item_id: Number(id), delta }));
+    if (items.length === 0) { flushingRef.current = false; return; }
+    try {
+      const r = await apiPost("/cart/batch", { session_id: sessionId, participant_id: participantId, operations: items });
+      setCartVersion(prev => {
+        if ((r.version || 0) > prev) { setCart(r.items || []); setCartTotal(r.total || 0); return r.version || 0; }
+        return prev;
+      });
+    } catch {}
+    flushingRef.current = false;
+    // If more ops queued during flush, flush again
+    if (cartQueueRef.current.length > 0) flushCartQueue();
+  }, [sessionId, participantId]);
+
+  const enqueueCartOp = useCallback((menuItemId: number, delta: number) => {
+    cartQueueRef.current.push({ menu_item_id: menuItemId, delta });
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = setTimeout(flushCartQueue, 120);
+  }, [flushCartQueue]);
+
+  const addToCart = (menuItemId: number) => {
+    if (paymentLocked) return;
     const mi = menu.find(m => m.id === menuItemId);
     if (mi) {
       setCart(prev => {
@@ -219,60 +248,28 @@ export default function TablePage() {
       });
       setCartTotal(p => p + mi.price);
     }
-    try { 
-      const r = await apiPost("/cart/add", { session_id: sessionId, menu_item_id: menuItemId, quantity: 1, participant_id: participantId }); 
-      // Only reconcile if this response is newer than current state (prevents slow API responses from overwriting fast WS updates)
-      setCartVersion(prev => {
-        if ((r.version || 0) > prev) {
-          setCart(r.items || []);
-          setCartTotal(r.total || 0);
-          return r.version || 0;
-        }
-        return prev;
-      });
-    } catch {}
-    setCartBusy(false);
+    enqueueCartOp(menuItemId, 1);
   };
 
-  const removeFromCart = async (cartItemId: string) => {
-    if (paymentLocked || cartBusy) return;
-    setCartBusy(true);
-    const it = cart.find(c => c.id === cartItemId);
-    if (it) { setCart(prev => prev.filter(c => c.id !== cartItemId)); setCartTotal(p => p - it.price * it.quantity); }
-    try { 
-      const r = await apiPost("/cart/remove", { session_id: sessionId, cart_item_id: cartItemId }); 
-      setCartVersion(prev => {
-        if ((r.version || 0) > prev) {
-          setCart(r.items || []);
-          setCartTotal(r.total || 0);
-          return r.version || 0;
-        }
-        return prev;
-      });
-    } catch {}
-    setCartBusy(false);
-  };
-
-  const updateQty = async (cartItemId: string, qty: number) => {
-    if (paymentLocked || cartBusy) return;
-    setCartBusy(true);
+  const removeFromCart = (cartItemId: string) => {
+    if (paymentLocked) return;
     const it = cart.find(c => c.id === cartItemId);
     if (it) {
-      if (qty <= 0) { setCart(prev => prev.filter(c => c.id !== cartItemId)); setCartTotal(p => p - it.price * it.quantity); }
-      else { setCart(prev => prev.map(c => c.id === cartItemId ? { ...c, quantity: qty } : c)); setCartTotal(p => p + it.price * (qty - it.quantity)); }
+      setCart(prev => prev.filter(c => c.id !== cartItemId));
+      setCartTotal(p => p - it.price * it.quantity);
+      enqueueCartOp(it.menu_item_id, -it.quantity);
     }
-    try { 
-      const r = await apiPost("/cart/update-quantity", { session_id: sessionId, cart_item_id: cartItemId, quantity: qty }); 
-      setCartVersion(prev => {
-        if ((r.version || 0) > prev) {
-          setCart(r.items || []);
-          setCartTotal(r.total || 0);
-          return r.version || 0;
-        }
-        return prev;
-      });
-    } catch {}
-    setCartBusy(false);
+  };
+
+  const updateQty = (cartItemId: string, qty: number) => {
+    if (paymentLocked) return;
+    const it = cart.find(c => c.id === cartItemId);
+    if (it) {
+      const delta = qty - it.quantity;
+      if (qty <= 0) { setCart(prev => prev.filter(c => c.id !== cartItemId)); setCartTotal(p => p - it.price * it.quantity); }
+      else { setCart(prev => prev.map(c => c.id === cartItemId ? { ...c, quantity: qty } : c)); setCartTotal(p => p + it.price * delta); }
+      enqueueCartOp(it.menu_item_id, delta);
+    }
   };
 
   /* ── Payment ──────────────────────────────────────── */
