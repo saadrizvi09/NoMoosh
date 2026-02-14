@@ -322,6 +322,12 @@ async def confirm_payment(data: PaymentConfirmRequest):
     # Clear Redis cart
     await cart_clear(data.session_id)
 
+    # CRITICAL: Broadcast empty cart to all users so they see it's cleared
+    await ws_manager.broadcast(data.session_id, {
+        "type": "cart_update",
+        "cart": {"items": [], "total": 0, "version": 0}
+    })
+
     # Table → dirty
     sb.table("restaurant_tables").update({"status": "dirty"}).eq("id", s["table_id"]).execute()
 

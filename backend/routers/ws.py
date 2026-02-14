@@ -202,15 +202,17 @@ async def session_ws(websocket: WebSocket, session_id: str):
     await manager.connect(session_id, websocket)
     logger.info(f"[WS] Customer connected: session={session_id[:8]}")
 
-    # Resolve restaurant_id for menu enrichment
+    # Resolve restaurant_id for menu enrichment (CRITICAL for cart operations)
     restaurant_id: int | None = None
     try:
         sb = get_supabase()
         sess = sb.table("sessions").select("restaurant_id").eq("id", session_id).execute()
         if sess.data:
             restaurant_id = sess.data[0]["restaurant_id"]
-    except Exception:
-        pass
+        else:
+            logger.error(f"[WS] Session {session_id[:8]} not found in DB - cart ops will fail")
+    except Exception as e:
+        logger.error(f"[WS] Failed to load restaurant_id for session {session_id[:8]}: {e}")
 
     # Push full state immediately on connect
     try:
@@ -243,23 +245,54 @@ async def session_ws(websocket: WebSocket, session_id: str):
 
                 # ── Cart mutations via Redis (atomic) ─────
                 elif msg_type == "cart_add":
+                    # Check payment lock in backend (defense in depth)
+                    session_check = sb.table("sessions").select("payment_lock").eq("id", session_id).execute()
+                    if session_check.data and session_check.data[0].get("payment_lock"):
+                        await websocket.send_json({"type": "error", "message": "Cart locked for payment"})
+                        continue
+                    
+                    if not restaurant_id:
+                        logger.error(f"[WS] cart_add failed - no restaurant_id for session {session_id[:8]}")
+                        await websocket.send_json({"type": "error", "message": "Session error"})
+                        continue
+                        
                     item_id = int(msg["item_id"])
                     delta = int(msg.get("delta", 1))
                     await cart_incr(session_id, item_id, delta)
                     await cart_bump_version(session_id)
-                    if restaurant_id:
-                        enriched = await get_enriched_cart(session_id, restaurant_id)
-                        await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+                    enriched = await get_enriched_cart(session_id, restaurant_id)
+                    await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+                    logger.info(f"[WS] cart_add: session={session_id[:8]}, item={item_id}, broadcast to {manager.count(session_id)} users")
 
                 elif msg_type == "cart_remove":
+                    session_check = sb.table("sessions").select("payment_lock").eq("id", session_id).execute()
+                    if session_check.data and session_check.data[0].get("payment_lock"):
+                        await websocket.send_json({"type": "error", "message": "Cart locked for payment"})
+                        continue
+                        
+                    if not restaurant_id:
+                        logger.error(f"[WS] cart_remove failed - no restaurant_id for session {session_id[:8]}")
+                        await websocket.send_json({"type": "error", "message": "Session error"})
+                        continue
+                        
                     item_id = int(msg["item_id"])
                     await cart_remove_item(session_id, item_id)
                     await cart_bump_version(session_id)
-                    if restaurant_id:
-                        enriched = await get_enriched_cart(session_id, restaurant_id)
-                        await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+                    enriched = await get_enriched_cart(session_id, restaurant_id)
+                    await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+                    logger.info(f"[WS] cart_remove: session={session_id[:8]}, item={item_id}, broadcast to {manager.count(session_id)} users")
 
                 elif msg_type == "cart_set_qty":
+                    session_check = sb.table("sessions").select("payment_lock").eq("id", session_id).execute()
+                    if session_check.data and session_check.data[0].get("payment_lock"):
+                        await websocket.send_json({"type": "error", "message": "Cart locked for payment"})
+                        continue
+                        
+                    if not restaurant_id:
+                        logger.error(f"[WS] cart_set_qty failed - no restaurant_id for session {session_id[:8]}")
+                        await websocket.send_json({"type": "error", "message": "Session error"})
+                        continue
+                        
                     item_id = int(msg["item_id"])
                     qty = int(msg["quantity"])
                     if qty <= 0:
@@ -267,9 +300,9 @@ async def session_ws(websocket: WebSocket, session_id: str):
                     else:
                         await cart_set_qty(session_id, item_id, qty)
                     await cart_bump_version(session_id)
-                    if restaurant_id:
-                        enriched = await get_enriched_cart(session_id, restaurant_id)
-                        await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+                    enriched = await get_enriched_cart(session_id, restaurant_id)
+                    await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+                    logger.info(f"[WS] cart_set_qty: session={session_id[:8]}, item={item_id}, qty={qty}, broadcast to {manager.count(session_id)} users")
 
             except json.JSONDecodeError:
                 logger.warning(f"[WS] Bad JSON from {session_id[:8]}")

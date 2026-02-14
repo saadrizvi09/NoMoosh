@@ -190,6 +190,11 @@ export default function TablePage() {
             setCart(msg.cart.items || []);
             setCartTotal(msg.cart.total || 0);
           }
+          else if (msg.type === "error") {
+            // Backend rejected operation — force sync to get correct state
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "sync" }));
+            setError(msg.message || "Operation failed");
+          }
           else if (msg.type === "payment_locked") { setPaymentLocked(true); setPaymentLockedBy(msg.locked_by || ""); setPhase("payment"); }
           else if (msg.type === "payment_unlocked") { setPaymentLocked(false); setPaymentLockedBy(""); setPhase("menu"); }
           else if (msg.type === "order_confirmed") { setOrderId(msg.order_id); setOrderTotal(msg.total); setPhase("confirmed"); }
