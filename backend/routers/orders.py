@@ -1,13 +1,13 @@
-"""Order / Cart / Payment / Chef / Menu-management endpoints.
+"""Order / Payment / Chef / Menu-management endpoints.
+
+Cart lives in Redis (see ws.py). Cart mutations flow through WebSocket.
 
 Endpoints:
-  POST /cart/add                          → Add item to shared cart
-  POST /cart/remove                       → Remove cart item
-  GET  /cart/{session_id}                 → Get enriched cart
   POST /sessions/join/{qr_token}          → Join table session (guest)
   GET  /sessions/{session_id}/status      → Session status (lock, ETA)
   POST /payment/lock                      → Lock cart for payment
-  POST /payment/confirm                   → Confirm payment → create order
+  POST /payment/unlock                    → Unlock cart
+  POST /payment/confirm                   → Confirm payment → create order (reads Redis cart)
   GET  /orders/restaurant/{restaurant_id} → Chef: all orders
   POST /orders/{order_id}/eta             → Chef: set ETA
   POST /menu/create                       → Owner: add dish
@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from supabase_client import get_supabase
 from routers.staff import get_staff_from_token
 from ws_manager import manager as ws_manager
+from redis_client import cart_get_all, cart_clear
 
 router = APIRouter(tags=["orders"])
 
@@ -34,12 +35,20 @@ _payment_timers: dict[str, asyncio.Task] = {}
 _payment_lock_owners: dict[str, str] = {}
 
 
+def invalidate_menu_cache(restaurant_id: int):
+    """Bust the ws.py menu cache when menu CRUD happens."""
+    try:
+        from routers.ws import invalidate_menu_cache as _inv
+        _inv(restaurant_id)
+    except Exception:
+        pass
+
+
 def _safe_session_update(sb, session_id: str, fields: dict):
     """Update session, retrying without new columns if they don't exist yet."""
     try:
         sb.table("sessions").update(fields).eq("id", session_id).execute()
     except Exception:
-        # Fallback: strip columns that may not exist in DB yet
         safe = {k: v for k, v in fields.items() if k in ("status", "payment_lock")}
         if safe:
             sb.table("sessions").update(safe).eq("id", session_id).execute()
@@ -48,25 +57,6 @@ def _safe_session_update(sb, session_id: str, fields: dict):
 # ═══════════════════════════════════════════════════════════
 # MODELS
 # ═══════════════════════════════════════════════════════════
-
-class AddToCartRequest(BaseModel):
-    session_id: str
-    menu_item_id: int
-    quantity: int = 1
-    participant_id: str | None = None
-    notes: str = ""
-
-
-class RemoveFromCartRequest(BaseModel):
-    session_id: str
-    cart_item_id: str
-
-
-class UpdateCartQtyRequest(BaseModel):
-    session_id: str
-    cart_item_id: str
-    quantity: int
-
 
 class PaymentLockRequest(BaseModel):
     session_id: str
@@ -102,227 +92,6 @@ class MenuItemUpdate(BaseModel):
     availability: bool | None = None
     variant_name: str | None = None
     category_veg: bool | None = None
-
-
-class CartBatchOp(BaseModel):
-    menu_item_id: int
-    delta: int  # +1 to add, -N to remove N
-
-class CartBatchRequest(BaseModel):
-    session_id: str
-    participant_id: str | None = None
-    operations: list[CartBatchOp]
-
-
-# ═══════════════════════════════════════════════════════════
-# IN-MEMORY MENU CACHE (avoids re-fetching on every cart op)
-# ═══════════════════════════════════════════════════════════
-import time as _time
-
-_menu_cache: dict[int, dict] = {}      # restaurant_id → {data, ts}
-_MENU_CACHE_TTL = 120                    # seconds
-
-def _get_menu_map(sb, restaurant_id: int) -> dict[int, dict]:
-    """Return menu items indexed by id, cached for 120s."""
-    cached = _menu_cache.get(restaurant_id)
-    if cached and (_time.time() - cached["ts"]) < _MENU_CACHE_TTL:
-        return cached["data"]
-    rows = sb.table("menu").select("id, dish_name, price, category, image_link, variant_name").eq("restaurant_id", restaurant_id).execute()
-    menu_map = {m["id"]: m for m in (rows.data or [])}
-    _menu_cache[restaurant_id] = {"data": menu_map, "ts": _time.time()}
-    return menu_map
-
-def invalidate_menu_cache(restaurant_id: int):
-    """Call after menu CRUD to bust cache."""
-    _menu_cache.pop(restaurant_id, None)
-
-
-# ═══════════════════════════════════════════════════════════
-# CART
-# ═══════════════════════════════════════════════════════════
-
-def _enrich_cart(sb, session_id: str, restaurant_id: int | None = None) -> dict:
-    """Return enriched cart data for a session. Uses menu cache if restaurant_id is provided."""
-    cart = sb.table("carts").select("id, version").eq("session_id", session_id).execute()
-    if not cart.data:
-        return {"items": [], "version": 0, "total": 0}
-
-    cart_id = cart.data[0]["id"]
-    items = (
-        sb.table("cart_items")
-        .select("id, menu_item_id, quantity, added_by, notes, created_at")
-        .eq("cart_id", cart_id)
-        .order("created_at")
-        .execute()
-    )
-    if not items.data:
-        return {"items": [], "version": cart.data[0]["version"], "total": 0}
-
-    # Use cache if restaurant_id provided, else fetch by ids
-    if restaurant_id:
-        menu_map = _get_menu_map(sb, restaurant_id)
-    else:
-        menu_ids = list({i["menu_item_id"] for i in items.data})
-        menu_rows = sb.table("menu").select("id, dish_name, price, category, image_link, variant_name").in_("id", menu_ids).execute()
-        menu_map = {m["id"]: m for m in (menu_rows.data or [])}
-
-    enriched = []
-    for item in items.data:
-        m = menu_map.get(item["menu_item_id"])
-        if m:
-            enriched.append({
-                **item,
-                "dish_name": m["dish_name"],
-                "price": m["price"],
-                "category": m.get("category"),
-                "image_link": m.get("image_link"),
-                "variant_name": m.get("variant_name", "Regular"),
-            })
-
-    total = sum(i["price"] * i["quantity"] for i in enriched)
-    return {"items": enriched, "version": cart.data[0]["version"], "total": total}
-
-
-@router.post("/cart/add")
-async def add_to_cart(data: AddToCartRequest):
-    sb = get_supabase()
-
-    # Check payment lock
-    session = sb.table("sessions").select("payment_lock").eq("id", data.session_id).execute()
-    if session.data and session.data[0].get("payment_lock"):
-        raise HTTPException(status_code=423, detail="Cart is locked — payment in progress")
-
-    cart = sb.table("carts").select("id, version").eq("session_id", data.session_id).execute()
-    if not cart.data:
-        raise HTTPException(status_code=404, detail="Cart not found for this session")
-
-    cart_id = cart.data[0]["id"]
-
-    # Upsert: if same item already in cart, bump quantity
-    existing = (
-        sb.table("cart_items")
-        .select("id, quantity")
-        .eq("cart_id", cart_id)
-        .eq("menu_item_id", data.menu_item_id)
-        .execute()
-    )
-    if existing.data:
-        new_qty = existing.data[0]["quantity"] + data.quantity
-        sb.table("cart_items").update({"quantity": new_qty}).eq("id", existing.data[0]["id"]).execute()
-    else:
-        sb.table("cart_items").insert({
-            "cart_id": cart_id,
-            "menu_item_id": data.menu_item_id,
-            "quantity": data.quantity,
-            "added_by": data.participant_id,
-            "notes": data.notes,
-        }).execute()
-
-    # Bump version
-    new_ver = cart.data[0]["version"] + 1
-    sb.table("carts").update({"version": new_ver, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", cart_id).execute()
-
-    # Enrich cart once
-    result = _enrich_cart(sb, data.session_id)
-
-    # Broadcast in background (non-blocking)
-    asyncio.create_task(ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result}))
-
-    return result
-
-
-@router.post("/cart/batch")
-async def batch_cart(data: CartBatchRequest):
-    """Process multiple cart add/remove operations in a single request.
-    Each operation has menu_item_id and delta (+N to add, -N to remove).
-    This eliminates per-item round trips for rapid tapping."""
-    sb = get_supabase()
-
-    # 1. Check payment lock + get cart (single query each)
-    session = sb.table("sessions").select("payment_lock, restaurant_id").eq("id", data.session_id).execute()
-    if not session.data:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if session.data[0].get("payment_lock"):
-        raise HTTPException(status_code=423, detail="Cart is locked — payment in progress")
-    restaurant_id = session.data[0]["restaurant_id"]
-
-    cart = sb.table("carts").select("id, version").eq("session_id", data.session_id).execute()
-    if not cart.data:
-        raise HTTPException(status_code=404, detail="Cart not found")
-    cart_id = cart.data[0]["id"]
-
-    # 2. Fetch ALL current cart items in one query
-    existing_items = sb.table("cart_items").select("id, menu_item_id, quantity").eq("cart_id", cart_id).execute()
-    existing_map: dict[int, dict] = {}
-    for it in (existing_items.data or []):
-        existing_map[it["menu_item_id"]] = it
-
-    # 3. Process all operations (minimal DB writes)
-    for op in data.operations:
-        cur = existing_map.get(op.menu_item_id)
-        if cur:
-            new_qty = cur["quantity"] + op.delta
-            if new_qty <= 0:
-                sb.table("cart_items").delete().eq("id", cur["id"]).execute()
-                del existing_map[op.menu_item_id]
-            else:
-                sb.table("cart_items").update({"quantity": new_qty}).eq("id", cur["id"]).execute()
-                cur["quantity"] = new_qty
-        elif op.delta > 0:
-            sb.table("cart_items").insert({
-                "cart_id": cart_id,
-                "menu_item_id": op.menu_item_id,
-                "quantity": op.delta,
-                "added_by": data.participant_id,
-            }).execute()
-
-    # 4. Bump version ONCE for entire batch
-    new_ver = cart.data[0]["version"] + 1
-    sb.table("carts").update({"version": new_ver, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", cart_id).execute()
-
-    # 5. Enrich with cached menu data
-    result = _enrich_cart(sb, data.session_id, restaurant_id)
-
-    # 6. Broadcast in background
-    asyncio.create_task(ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result}))
-
-    return result
-
-
-@router.post("/cart/remove")
-async def remove_from_cart(data: RemoveFromCartRequest):
-    sb = get_supabase()
-    session = sb.table("sessions").select("payment_lock").eq("id", data.session_id).execute()
-    if session.data and session.data[0].get("payment_lock"):
-        raise HTTPException(status_code=423, detail="Cart is locked — payment in progress")
-
-    sb.table("cart_items").delete().eq("id", data.cart_item_id).execute()
-    result = _enrich_cart(sb, data.session_id)
-    asyncio.create_task(ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result}))
-    return result
-
-
-@router.post("/cart/update-quantity")
-async def update_cart_quantity(data: UpdateCartQtyRequest):
-    sb = get_supabase()
-    session = sb.table("sessions").select("payment_lock").eq("id", data.session_id).execute()
-    if session.data and session.data[0].get("payment_lock"):
-        raise HTTPException(status_code=423, detail="Cart is locked — payment in progress")
-
-    if data.quantity <= 0:
-        sb.table("cart_items").delete().eq("id", data.cart_item_id).execute()
-    else:
-        sb.table("cart_items").update({"quantity": data.quantity}).eq("id", data.cart_item_id).execute()
-
-    result = _enrich_cart(sb, data.session_id)
-    asyncio.create_task(ws_manager.broadcast(data.session_id, {"type": "cart_update", "cart": result}))
-    return result
-
-
-@router.get("/cart/{session_id}")
-async def get_cart(session_id: str):
-    sb = get_supabase()
-    return _enrich_cart(sb, session_id)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -486,29 +255,24 @@ async def confirm_payment(data: PaymentConfirmRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     s = session.data[0]
 
-    # Get cart
-    cart = sb.table("carts").select("id").eq("session_id", data.session_id).execute()
-    if not cart.data:
-        raise HTTPException(status_code=404, detail="Cart not found")
-
-    cart_items = sb.table("cart_items").select("*").eq("cart_id", cart.data[0]["id"]).execute()
-    if not cart_items.data:
+    # ── Read cart from Redis ──────────────────────────────
+    raw_cart = await cart_get_all(data.session_id)
+    if not raw_cart:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
-    # Batch-fetch all menu data at once
-    menu_ids = list({ci["menu_item_id"] for ci in cart_items.data})
-    menu_rows = sb.table("menu").select("id, price, dish_name, category, variant_name").in_("id", menu_ids).execute()
-    menu_map = {m["id"]: m for m in (menu_rows.data or [])}
+    # Enrich with menu data
+    from routers.ws import _get_menu_map
+    menu_map = _get_menu_map(sb, s["restaurant_id"])
 
     total = 0
     order_items_data = []
-    for ci in cart_items.data:
-        m = menu_map.get(ci["menu_item_id"], {})
+    for item_id, qty in raw_cart.items():
+        m = menu_map.get(item_id, {})
         price = m.get("price", 0)
-        total += price * ci["quantity"]
+        total += price * qty
         order_items_data.append({
-            "menu_item_id": ci["menu_item_id"],
-            "quantity": ci["quantity"],
+            "menu_item_id": item_id,
+            "quantity": qty,
             "price_at_time": price,
             "dish_name": m.get("dish_name", "Unknown"),
             "category": m.get("category"),
@@ -554,6 +318,9 @@ async def confirm_payment(data: PaymentConfirmRequest):
         "payment_locked_by": None,
     })
     _payment_lock_owners.pop(data.session_id, None)
+
+    # Clear Redis cart
+    await cart_clear(data.session_id)
 
     # Table → dirty
     sb.table("restaurant_tables").update({"status": "dirty"}).eq("id", s["table_id"]).execute()

@@ -19,7 +19,6 @@ interface MenuItem {
 }
 
 interface CartItem {
-  id: string;
   menu_item_id: number;
   quantity: number;
   dish_name: string;
@@ -43,7 +42,6 @@ export default function TablePage() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartTotal, setCartTotal] = useState(0);
-  const [cartVersion, setCartVersion] = useState(0);
   const [showCart, setShowCart] = useState(false);
   const [paymentLocked, setPaymentLocked] = useState(false);
   const [paymentLockedBy, setPaymentLockedBy] = useState("");
@@ -63,9 +61,6 @@ export default function TablePage() {
   const wsConnectedRef = useRef(false);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
-  const cartQueueRef = useRef<{ menu_item_id: number; delta: number }[]>([]);
-  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const flushingRef = useRef(false);
   const rdRef = useRef(1000);
 
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -182,7 +177,7 @@ export default function TablePage() {
           const msg = JSON.parse(e.data);
           if (msg.type === "pong") return;
           if (msg.type === "init") {
-            const c = msg.cart || {}; setCart(c.items || []); setCartTotal(c.total || 0); setCartVersion(c.version || 0);
+            const c = msg.cart || {}; setCart(c.items || []); setCartTotal(c.total || 0);
             const s = msg.session || {};
             if (s.session_status === "completed") {
               if (s.order) { setOrderId(s.order.id); setOrderTotal(s.order.total_amount); }
@@ -190,16 +185,10 @@ export default function TablePage() {
               else setPhase("confirmed");
             } else if (s.payment_lock) { setPaymentLocked(true); setPaymentLockedBy(s.payment_locked_by || ""); setPhase("payment"); }
           }
-          else if (msg.type === "cart_update" && msg.cart) { 
-            // Only update if incoming version is newer (prevents optimistic update overwrites)
-            setCartVersion(prev => {
-              if ((msg.cart.version || 0) > prev) {
-                setCart(msg.cart.items || []); 
-                setCartTotal(msg.cart.total || 0);
-                return msg.cart.version || 0;
-              }
-              return prev;
-            });
+          else if (msg.type === "cart_update" && msg.cart) {
+            // Redis is atomic — always accept the latest broadcast as source of truth
+            setCart(msg.cart.items || []);
+            setCartTotal(msg.cart.total || 0);
           }
           else if (msg.type === "payment_locked") { setPaymentLocked(true); setPaymentLockedBy(msg.locked_by || ""); setPhase("payment"); }
           else if (msg.type === "payment_unlocked") { setPaymentLocked(false); setPaymentLockedBy(""); setPhase("menu"); }
@@ -218,65 +207,47 @@ export default function TablePage() {
   useEffect(() => { if (phase !== "countdown" && phase !== "payment") return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, [phase]);
   useEffect(() => { if (phase !== "payment") { setPaymentCountdown(0); return; } const id = setInterval(() => setPaymentCountdown(p => p <= 0 ? 120 : p - 1), 1000); setPaymentCountdown(120); return () => clearInterval(id); }, [phase]);
 
-  /* ── Cart actions — QUEUE + BATCH (instant, no blocking) ── */
-  const flushCartQueue = useCallback(async () => {
-    if (flushingRef.current || cartQueueRef.current.length === 0 || !sessionId) return;
-    flushingRef.current = true;
-    const ops = [...cartQueueRef.current];
-    cartQueueRef.current = [];
-    // Merge same-item ops: {menu_item_id: totalDelta}
-    const merged: Record<number, number> = {};
-    for (const op of ops) merged[op.menu_item_id] = (merged[op.menu_item_id] || 0) + op.delta;
-    const items = Object.entries(merged).filter(([, d]) => d !== 0).map(([id, delta]) => ({ menu_item_id: Number(id), delta }));
-    if (items.length === 0) { flushingRef.current = false; return; }
-    try {
-      // Send batch request - don't reconcile from response, let WebSocket handle it
-      await apiPost("/cart/batch", { session_id: sessionId, participant_id: participantId, operations: items });
-    } catch {}
-    flushingRef.current = false;
-    // If more ops queued during flush, flush again
-    if (cartQueueRef.current.length > 0) flushCartQueue();
-  }, [sessionId, participantId]);
-
-  const enqueueCartOp = useCallback((menuItemId: number, delta: number) => {
-    cartQueueRef.current.push({ menu_item_id: menuItemId, delta });
-    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
-    flushTimerRef.current = setTimeout(flushCartQueue, 120);
-  }, [flushCartQueue]);
+  /* ── Cart actions — via WebSocket → Redis (instant, atomic) ── */
+  const sendCartMsg = useCallback((msg: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }, []);
 
   const addToCart = (menuItemId: number) => {
     if (paymentLocked) return;
     const mi = menu.find(m => m.id === menuItemId);
     if (mi) {
+      // Optimistic UI
       setCart(prev => {
         const ex = prev.find(c => c.menu_item_id === menuItemId);
         if (ex) return prev.map(c => c.menu_item_id === menuItemId ? { ...c, quantity: c.quantity + 1 } : c);
-        return [...prev, { id: `t_${Date.now()}`, menu_item_id: menuItemId, quantity: 1, dish_name: mi.dish_name, price: mi.price, category: mi.category, variant_name: mi.variant_name }];
+        return [...prev, { menu_item_id: menuItemId, quantity: 1, dish_name: mi.dish_name, price: mi.price, category: mi.category, variant_name: mi.variant_name }];
       });
       setCartTotal(p => p + mi.price);
     }
-    enqueueCartOp(menuItemId, 1);
+    sendCartMsg({ type: "cart_add", item_id: menuItemId });
   };
 
-  const removeFromCart = (cartItemId: string) => {
+  const removeFromCart = (menuItemId: number) => {
     if (paymentLocked) return;
-    const it = cart.find(c => c.id === cartItemId);
+    const it = cart.find(c => c.menu_item_id === menuItemId);
     if (it) {
-      setCart(prev => prev.filter(c => c.id !== cartItemId));
+      setCart(prev => prev.filter(c => c.menu_item_id !== menuItemId));
       setCartTotal(p => p - it.price * it.quantity);
-      enqueueCartOp(it.menu_item_id, -it.quantity);
     }
+    sendCartMsg({ type: "cart_remove", item_id: menuItemId });
   };
 
-  const updateQty = (cartItemId: string, qty: number) => {
+  const updateQty = (menuItemId: number, qty: number) => {
     if (paymentLocked) return;
-    const it = cart.find(c => c.id === cartItemId);
+    const it = cart.find(c => c.menu_item_id === menuItemId);
     if (it) {
       const delta = qty - it.quantity;
-      if (qty <= 0) { setCart(prev => prev.filter(c => c.id !== cartItemId)); setCartTotal(p => p - it.price * it.quantity); }
-      else { setCart(prev => prev.map(c => c.id === cartItemId ? { ...c, quantity: qty } : c)); setCartTotal(p => p + it.price * delta); }
-      enqueueCartOp(it.menu_item_id, delta);
+      if (qty <= 0) { setCart(prev => prev.filter(c => c.menu_item_id !== menuItemId)); setCartTotal(p => p - it.price * it.quantity); }
+      else { setCart(prev => prev.map(c => c.menu_item_id === menuItemId ? { ...c, quantity: qty } : c)); setCartTotal(p => p + it.price * delta); }
     }
+    if (qty <= 0) sendCartMsg({ type: "cart_remove", item_id: menuItemId });
+    else sendCartMsg({ type: "cart_set_qty", item_id: menuItemId, quantity: qty });
   };
 
   /* ── Payment ──────────────────────────────────────── */
@@ -308,7 +279,6 @@ export default function TablePage() {
   };
 
   const getQty = (id: number) => cart.find(c => c.menu_item_id === id)?.quantity || 0;
-  const getCI = (id: number) => cart.find(c => c.menu_item_id === id);
   const filtered = menu.filter(i => { const ok = (i.category || "Other") === activeCategory; return !searchQuery ? ok : ok && i.dish_name.toLowerCase().includes(searchQuery.toLowerCase()); });
 
   /* ═══════ RENDER ═══════ */
@@ -341,7 +311,7 @@ export default function TablePage() {
       <div className="bg-red-50 rounded-xl px-3 py-2 mb-4 flex items-center justify-between"><span className="text-xs text-red-600 font-medium">Auto-cancels in</span><span className="text-sm font-bold text-red-600">{Math.floor(paymentCountdown / 60)}:{(paymentCountdown % 60).toString().padStart(2, "0")}</span></div>
       <div className="bg-gray-50 rounded-xl p-3 mb-4">
         <div className="text-xs font-semibold text-gray-500 uppercase mb-2">Order Summary</div>
-        {cart.map(item => (<div key={item.id} className="flex justify-between text-sm py-1.5 border-b border-gray-100 last:border-0"><div className="flex-1 min-w-0"><span className="text-gray-800">{item.dish_name}</span>{item.variant_name !== "Regular" && <span className="text-gray-400 ml-1 text-xs">({item.variant_name})</span>}<span className="text-gray-400 ml-1">x{item.quantity}</span></div><span className="font-semibold text-gray-900 ml-2">&#8377;{item.price * item.quantity}</span></div>))}
+        {cart.map(item => (<div key={item.menu_item_id} className="flex justify-between text-sm py-1.5 border-b border-gray-100 last:border-0"><div className="flex-1 min-w-0"><span className="text-gray-800">{item.dish_name}</span>{item.variant_name !== "Regular" && <span className="text-gray-400 ml-1 text-xs">({item.variant_name})</span>}<span className="text-gray-400 ml-1">x{item.quantity}</span></div><span className="font-semibold text-gray-900 ml-2">&#8377;{item.price * item.quantity}</span></div>))}
         <div className="flex justify-between font-bold text-gray-900 pt-2 mt-1 border-t border-gray-200"><span>Total</span><span>&#8377;{cartTotal}</span></div>
       </div>
       {participantCount > 1 && (<button onClick={() => setShowSplit(!showSplit)} className="w-full mb-3 py-2.5 rounded-xl bg-orange-50 border border-orange-200 text-sm font-semibold active:bg-orange-100" style={{ color: BRAND }}>{showSplit ? "Hide" : "Split"} Bill &middot; {participantCount} people</button>)}
@@ -380,7 +350,7 @@ export default function TablePage() {
       <div className="px-3 py-3">
         <div className="grid grid-cols-2 gap-2">
           {filtered.map(item => {
-            const q = getQty(item.id), ci = getCI(item.id);
+            const q = getQty(item.id);
             return (
               <div key={item.id} className="bg-white rounded-xl border border-gray-100 shadow-sm">
                 <div className="p-2.5 flex flex-col h-full">
@@ -395,7 +365,7 @@ export default function TablePage() {
                     {q === 0
                       ? <button onClick={() => addToCart(item.id)} className="px-3.5 py-1 rounded-lg text-[11px] font-bold border-2 active:scale-95 transition" style={{ color: BRAND, borderColor: BRAND }}>ADD</button>
                       : <div className="flex items-center rounded-lg overflow-hidden border-2" style={{ borderColor: BRAND }}>
-                          <button onClick={() => ci && updateQty(ci.id, q - 1)} className="w-6 h-6 flex items-center justify-center text-xs font-bold active:bg-orange-50" style={{ color: BRAND }}>−</button>
+                          <button onClick={() => updateQty(item.id, q - 1)} className="w-6 h-6 flex items-center justify-center text-xs font-bold active:bg-orange-50" style={{ color: BRAND }}>−</button>
                           <span className="w-4 text-center text-[11px] font-bold" style={{ color: BRAND }}>{q}</span>
                           <button onClick={() => addToCart(item.id)} className="w-6 h-6 flex items-center justify-center text-white text-xs font-bold active:opacity-80" style={{ background: BRAND }}>+</button>
                         </div>
@@ -430,13 +400,13 @@ export default function TablePage() {
             {cart.length === 0 ? (<div className="p-10 text-center text-gray-400 text-sm">Cart is empty</div>) : (
               <div className="p-4 space-y-2">
                 {cart.map(item => (
-                  <div key={item.id} className="flex items-center justify-between py-1">
+                  <div key={item.menu_item_id} className="flex items-center justify-between py-1">
                     <div className="flex-1 min-w-0 mr-3"><div className="font-semibold text-gray-900 text-sm truncate">{item.dish_name}</div>{item.variant_name !== "Regular" && <div className="text-[11px] text-gray-400">{item.variant_name}</div>}<div className="text-xs text-gray-500">&#8377;{item.price}</div></div>
                     <div className="flex items-center gap-2">
                       <div className="flex items-center rounded-lg overflow-hidden border-2" style={{ borderColor: BRAND }}>
-                        <button onClick={() => updateQty(item.id, item.quantity - 1)} className="w-7 h-7 flex items-center justify-center text-sm font-bold active:bg-orange-50" style={{ color: BRAND }}>−</button>
+                        <button onClick={() => updateQty(item.menu_item_id, item.quantity - 1)} className="w-7 h-7 flex items-center justify-center text-sm font-bold active:bg-orange-50" style={{ color: BRAND }}>−</button>
                         <span className="w-5 text-center font-bold text-xs" style={{ color: BRAND }}>{item.quantity}</span>
-                        <button onClick={() => updateQty(item.id, item.quantity + 1)} className="w-7 h-7 flex items-center justify-center text-white text-sm font-bold active:opacity-80" style={{ background: BRAND }}>+</button>
+                        <button onClick={() => updateQty(item.menu_item_id, item.quantity + 1)} className="w-7 h-7 flex items-center justify-center text-white text-sm font-bold active:opacity-80" style={{ background: BRAND }}>+</button>
                       </div>
                       <span className="font-bold text-gray-900 text-sm w-14 text-right">&#8377;{item.price * item.quantity}</span>
                     </div>

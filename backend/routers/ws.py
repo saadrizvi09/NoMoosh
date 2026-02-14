@@ -1,22 +1,87 @@
-"""WebSocket endpoints — WhatsApp-style push architecture.
+"""WebSocket endpoints — Redis-backed cart state machine.
 
 Three channels:
-  /ws/{session_id}              → Customer session (cart, payment, ETA)
+  /ws/{session_id}              → Customer session (cart via Redis, payment, ETA)
   /ws/staff/{restaurant_id}     → Staff dashboards (tables, orders)
   /ws/table/{qr_token}          → Waiting customers (table activation)
 
-On connect, server pushes FULL current state immediately.
-All mutations broadcast incremental updates — zero polling needed.
+Cart mutations flow through WebSocket → Redis HINCRBY (atomic) → broadcast.
+On connect, server pushes FULL current state from Redis immediately.
 """
 
 from __future__ import annotations
-import json, logging
+import json, logging, time as _time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from ws_manager import manager
 from supabase_client import get_supabase
+from redis_client import (
+    cart_incr, cart_set_qty, cart_remove_item,
+    cart_get_all, cart_bump_version, cart_get_version, cart_clear,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+# ── Menu cache (shared enrichment) ─────────────────────────
+
+_menu_cache: dict[int, dict] = {}
+_MENU_CACHE_TTL = 120
+
+
+def _get_menu_map(sb, restaurant_id: int) -> dict[int, dict]:
+    """Menu items indexed by id, cached in-memory for 120s."""
+    cached = _menu_cache.get(restaurant_id)
+    if cached and (_time.time() - cached["ts"]) < _MENU_CACHE_TTL:
+        return cached["data"]
+    rows = (
+        sb.table("menu")
+        .select("id, dish_name, price, category, image_link, variant_name")
+        .eq("restaurant_id", restaurant_id)
+        .execute()
+    )
+    menu_map = {m["id"]: m for m in (rows.data or [])}
+    _menu_cache[restaurant_id] = {"data": menu_map, "ts": _time.time()}
+    return menu_map
+
+
+def invalidate_menu_cache(restaurant_id: int):
+    _menu_cache.pop(restaurant_id, None)
+
+
+# ── Cart enrichment from Redis ─────────────────────────────
+
+async def get_enriched_cart(session_id: str, restaurant_id: int) -> dict:
+    """Read cart from Redis, enrich with cached menu data."""
+    raw = await cart_get_all(session_id)
+    ver = await cart_get_version(session_id)
+
+    if not raw:
+        return {"items": [], "total": 0, "version": ver}
+
+    sb = get_supabase()
+    menu_map = _get_menu_map(sb, restaurant_id)
+
+    items = []
+    total = 0
+    for item_id, qty in raw.items():
+        m = menu_map.get(item_id, {})
+        price = m.get("price", 0)
+        items.append({
+            "menu_item_id": item_id,
+            "quantity": qty,
+            "dish_name": m.get("dish_name", "Unknown"),
+            "price": price,
+            "category": m.get("category"),
+            "image_link": m.get("image_link"),
+            "variant_name": m.get("variant_name", "Regular"),
+        })
+        total += price * qty
+
+    return {"items": items, "total": total, "version": ver}
+
+
+# ── Helpers: build state payloads ──────────────────────────
 
 # Import in-memory lock owners from orders module (lazy to avoid circular)
 def _get_lock_owner(session_id: str) -> str | None:
@@ -25,52 +90,6 @@ def _get_lock_owner(session_id: str) -> str | None:
         return _payment_lock_owners.get(session_id)
     except Exception:
         return None
-
-
-# ── Shared helpers: build state payloads ───────────────────
-
-def _get_cart_state(session_id: str) -> dict:
-    """Full enriched cart for a session."""
-    sb = get_supabase()
-    cart = sb.table("carts").select("id, version").eq("session_id", session_id).execute()
-    if not cart.data:
-        return {"items": [], "version": 0, "total": 0}
-
-    cart_id = cart.data[0]["id"]
-    items = (
-        sb.table("cart_items")
-        .select("id, menu_item_id, quantity, added_by, notes, created_at")
-        .eq("cart_id", cart_id)
-        .order("created_at")
-        .execute()
-    )
-    if not items.data:
-        return {"items": [], "version": cart.data[0]["version"], "total": 0}
-
-    menu_ids = list({i["menu_item_id"] for i in items.data})
-    menu_rows = (
-        sb.table("menu")
-        .select("id, dish_name, price, category, image_link, variant_name")
-        .in_("id", menu_ids)
-        .execute()
-    )
-    menu_map = {m["id"]: m for m in (menu_rows.data or [])}
-
-    enriched = []
-    for item in items.data:
-        m = menu_map.get(item["menu_item_id"])
-        if m:
-            enriched.append({
-                **item,
-                "dish_name": m["dish_name"],
-                "price": m["price"],
-                "category": m.get("category"),
-                "image_link": m.get("image_link"),
-                "variant_name": m.get("variant_name", "Regular"),
-            })
-
-    total = sum(i["price"] * i["quantity"] for i in enriched)
-    return {"items": enriched, "version": cart.data[0]["version"], "total": total}
 
 
 def _get_session_state(session_id: str) -> dict:
@@ -179,15 +198,28 @@ def _get_staff_state(restaurant_id: int) -> dict:
 
 @router.websocket("/ws/{session_id}")
 async def session_ws(websocket: WebSocket, session_id: str):
-    """Customer WS — pushes cart/payment/ETA updates instantly."""
+    """Customer WS — cart mutations go through here → Redis → broadcast."""
     await manager.connect(session_id, websocket)
     logger.info(f"[WS] Customer connected: session={session_id[:8]}")
 
-    # Push full state immediately on connect (like WhatsApp message sync)
+    # Resolve restaurant_id for menu enrichment
+    restaurant_id: int | None = None
     try:
-        cart = _get_cart_state(session_id)
-        session = _get_session_state(session_id)
-        await websocket.send_json({"type": "init", "cart": cart, "session": session})
+        sb = get_supabase()
+        sess = sb.table("sessions").select("restaurant_id").eq("id", session_id).execute()
+        if sess.data:
+            restaurant_id = sess.data[0]["restaurant_id"]
+    except Exception:
+        pass
+
+    # Push full state immediately on connect
+    try:
+        if restaurant_id:
+            cart_state = await get_enriched_cart(session_id, restaurant_id)
+        else:
+            cart_state = {"items": [], "total": 0, "version": 0}
+        session_state = _get_session_state(session_id)
+        await websocket.send_json({"type": "init", "cart": cart_state, "session": session_state})
     except Exception as e:
         logger.error(f"[WS] Init push failed {session_id[:8]}: {e}")
 
@@ -196,15 +228,53 @@ async def session_ws(websocket: WebSocket, session_id: str):
             data = await websocket.receive_text()
             try:
                 msg = json.loads(data)
-                if msg.get("type") == "ping":
+                msg_type = msg.get("type", "")
+
+                if msg_type == "ping":
                     await websocket.send_json({"type": "pong"})
-                elif msg.get("type") == "sync":
-                    # Client requests full re-sync (e.g. after wake from sleep)
-                    cart = _get_cart_state(session_id)
-                    session = _get_session_state(session_id)
-                    await websocket.send_json({"type": "init", "cart": cart, "session": session})
+
+                elif msg_type == "sync":
+                    if restaurant_id:
+                        cart_state = await get_enriched_cart(session_id, restaurant_id)
+                    else:
+                        cart_state = {"items": [], "total": 0, "version": 0}
+                    session_state = _get_session_state(session_id)
+                    await websocket.send_json({"type": "init", "cart": cart_state, "session": session_state})
+
+                # ── Cart mutations via Redis (atomic) ─────
+                elif msg_type == "cart_add":
+                    item_id = int(msg["item_id"])
+                    delta = int(msg.get("delta", 1))
+                    await cart_incr(session_id, item_id, delta)
+                    await cart_bump_version(session_id)
+                    if restaurant_id:
+                        enriched = await get_enriched_cart(session_id, restaurant_id)
+                        await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+
+                elif msg_type == "cart_remove":
+                    item_id = int(msg["item_id"])
+                    await cart_remove_item(session_id, item_id)
+                    await cart_bump_version(session_id)
+                    if restaurant_id:
+                        enriched = await get_enriched_cart(session_id, restaurant_id)
+                        await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+
+                elif msg_type == "cart_set_qty":
+                    item_id = int(msg["item_id"])
+                    qty = int(msg["quantity"])
+                    if qty <= 0:
+                        await cart_remove_item(session_id, item_id)
+                    else:
+                        await cart_set_qty(session_id, item_id, qty)
+                    await cart_bump_version(session_id)
+                    if restaurant_id:
+                        enriched = await get_enriched_cart(session_id, restaurant_id)
+                        await manager.broadcast(session_id, {"type": "cart_update", "cart": enriched})
+
             except json.JSONDecodeError:
                 logger.warning(f"[WS] Bad JSON from {session_id[:8]}")
+            except Exception as e:
+                logger.error(f"[WS] Cart action error {session_id[:8]}: {e}")
     except WebSocketDisconnect:
         logger.info(f"[WS] Customer disconnected: session={session_id[:8]}")
     except Exception as e:
